@@ -4,7 +4,7 @@ Aplicativo desktop Tauri 2, React, Django e **SQLite**. Interface em português,
 
 ## Usar sem instalar dependências
 
-Baixe o arquivo **Clareza-linux-x86_64.run**, permita sua execução nas propriedades do arquivo e abra-o. Ele inclui a interface, o serviço Django, o interpretador Python, SQLite e as bibliotecas gráficas empacotadas. Não é necessário instalar Python, Node, Rust, PostgreSQL ou FUSE, nem ter o código-fonte.
+Baixe o arquivo **Clareza-linux-x86_64.run**, permita sua execução nas propriedades do arquivo e abra-o. Ele inclui a interface, o serviço Django, o interpretador Python, SQLite e as bibliotecas gráficas empacotadas. Não é necessário instalar Python, Node, Rust ou FUSE, nem ter o código-fonte.
 
 O arquivo fica em `dist/` após compilar. Em um terminal:
 
@@ -40,24 +40,13 @@ Para abrir a versão compilada: `./start-desktop.sh`. Para instalar uma cópia i
 
 A cópia fica em `~/.local/share/clareza-app/`. Consulte `runtime.log` na pasta de dados em caso de erro.
 
-## Dados da versão PostgreSQL
-
-O banco antigo não é apagado nem vai no pacote. O conversor é uma operação local opcional, executada com o aplicativo fechado e antes de criar o SQLite definitivo:
-
-```bash
-# Apenas no ambiente antigo, que já possui psycopg.
-.venv/bin/python scripts/migrate-postgres-to-sqlite.py
-```
-
-O script lê PostgreSQL na porta 55433 por padrão, aceita variáveis `POSTGRES_*`, importa para uma base temporária, confere todos os registros exportados e a integridade, e só então publica o SQLite. Recusa substituir um SQLite existente. Não depende de PostgreSQL após a conversão.
-
 ## Desenvolver a versão web
 
 ```bash
 ./start.sh
 ```
 
-Abra **http://localhost:5173**. A API usa **http://127.0.0.1:8000/api/v1/** e o mesmo SQLite do usuário. Não há mais serviço PostgreSQL ou Docker no fluxo normal. O primeiro acesso cria um espaço vazio com categorias padrão.
+Abra **http://localhost:5173**. A API usa **http://127.0.0.1:8000/api/v1/** e o mesmo SQLite do usuário. O primeiro acesso cria um espaço vazio com categorias padrão.
 
 ## Funcionalidades
 

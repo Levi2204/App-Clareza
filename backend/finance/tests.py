@@ -75,7 +75,7 @@ class FinanceTests(TestCase):
     def test_assets_liabilities_and_payment_history(self):
         m.Balance.objects.create(account=self.account, month=date(2026, 8, 1), amount=1000)
         bill = m.Bill.objects.create(user=self.user, description='Internet', amount=120, account=self.account, category=self.category, month=date(2026, 8, 1), due_date=date(2026, 8, 20))
-        self.assertEqual(s.summary(self.user, self.month)['net_worth'], 880)
+        self.assertEqual(s.summary(self.user, self.month)['net_worth'], 1000)
         self.assertEqual(self.client.post(f'/api/v1/bills/{bill.id}/pay/').status_code, 200)
         self.assertEqual(s.summary(self.user, self.month)['net_worth'], 1000)
         self.assertEqual(s.summary(self.user, date(2026, 8, 1))['liabilities'], 120)

@@ -18,8 +18,6 @@ subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
     '--collect-submodules', 'finance', '--collect-submodules', 'config',
     '--collect-submodules', 'django', '--collect-all', 'rest_framework',
     '--collect-all', 'corsheaders', '--hidden-import', 'django.db.backends.sqlite3',
-    '--exclude-module', 'psycopg', '--exclude-module', 'psycopg2',
-    '--exclude-module', 'django.db.backends.postgresql',
     '--exclude-module', 'django.db.backends.mysql',
     '--exclude-module', 'django.db.backends.oracle',
     str(root / 'backend/desktop_runtime.py')], env=env, check=True)
