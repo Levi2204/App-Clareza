@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Clareza",
+  "version": "1.0.0",
+  "identifier": "br.local.clareza",
+  "build": {
+    "beforeDevCommand": "npm run dev -- --port 1420 --strictPort",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [{
+      "label": "main", "title": "Clareza · Finanças pessoais",
+      "width": 1320, "height": 880, "minWidth": 760, "minHeight": 580,
+      "center": true, "backgroundColor": "#f6f7f3"
+    }],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["appimage"],
+    "resources": {"service/": "service/"},
+    "linux": {"appimage": {"files": {"/usr/lib/gstreamer-1.0/libgstapp.so": "service/libgstapp.so"}}},
+    "category": "Finance",
+    "shortDescription": "Suas finanças com mais clareza",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png"]
+  }
+}

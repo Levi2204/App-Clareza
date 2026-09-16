@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "Janela local do Clareza",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

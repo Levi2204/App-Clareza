@@ -1,0 +1,46 @@
+name: Aplicativo Linux
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Bibliotecas de compilação
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential librsvg2-dev patchelf libssl-dev
+      - name: Dependências do projeto
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r backend/requirements-build.txt
+          npm --prefix frontend ci
+      - name: Testes
+        env:
+          CLAREZA_DATA_DIR: ${{ runner.temp }}/clareza-tests
+        run: |
+          .venv/bin/python backend/manage.py test finance
+          npm --prefix frontend test
+      - name: Compilar arquivo portátil
+        run: ./build-desktop.sh
+      - name: Testar serviço sem Python externo
+        run: .venv/bin/python scripts/check-desktop-runtime.py --service frontend/src-tauri/service/clareza-service/clareza-service
+      - name: Guardar arquivos para download
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clareza-linux-x86_64
+          path: |
+            dist/Clareza-linux-x86_64.run
+            dist/Clareza-linux-x86_64.AppImage
+            dist/SHA256SUMS
