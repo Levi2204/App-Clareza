@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, LoaderCircle, X } from 'lucide-react';
+import { MoneyValue, useValueVisibility, PrivacyButton } from './PrivacyContext';
 import { api, dateLabel, money, today } from './api';
 import { confirmAction } from './confirm';
 
@@ -51,9 +52,9 @@ export function SubscriptionDialog({ data, close, saved }) {
       <label>Início da assinatura<input required type="date" value={values.start_date} onChange={e => change('start_date', e.target.value)}/></label>
     </div>
     <div className="payment-mode" role="group" aria-label="Escolha da primeira cobrança"><button type="button" className={values.include_start_month ? 'selected' : ''} onClick={() => change('include_start_month', true)}>Incluir no mês inicial</button><button type="button" className={!values.include_start_month ? 'selected' : ''} onClick={() => change('include_start_month', false)}>Próxima cobrança regular</button></div>
-    {error && <div role="alert" className="alert error">{error}</div>}
+    {error && <div role="alert" className="alert error">{hidden ? 'Existe um conflito financeiro. Mostre os valores para consultar os detalhes.' : error}</div>}
     <div className="preview-actions"><button type="button" className="button secondary" disabled={busy || previewBusy} onClick={showPreview}>{previewBusy ? <><LoaderCircle className="spin" size={16}/>Calculando…</> : 'Revisar primeira cobrança'}</button></div>
-    {preview && <div className="subscription-preview"><strong>Primeira cobrança: {dateLabel(preview.first_charge_date)}</strong><span>{money(preview.amount)} · {preview.destination}</span>{preview.conflicts.map((message, index) => <small className="negative" key={index}>{message}</small>)}</div>}
+    {preview && <div className="subscription-preview"><strong>Primeira cobrança: {dateLabel(preview.first_charge_date)}</strong><span><MoneyValue value={preview.amount} /> · {preview.destination}</span>{preview.conflicts.map((message, index) => <small className="negative" key={index}>{message}</small>)}</div>}
     <div className="dialog-footer"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" disabled={busy || !preview?.can_create}>{busy ? 'Salvando…' : 'Confirmar assinatura'}<Check size={16}/></button></div>
   </form></dialog>;
 }
@@ -80,7 +81,7 @@ export function ReviewFirstChargeDialog({ subscription, close, saved }) {
     <div className="dialog-heading"><div><span className="eyebrow">REVISÃO INDIVIDUAL</span><h2>Primeira cobrança de {subscription.name}</h2></div><button type="button" className="icon-button" onClick={close} aria-label="Fechar"><X size={20}/></button></div>
     <p className="form-note">Esta ação só é permitida quando ainda não existe histórico da assinatura.</p>
     <div className="payment-mode"><button type="button" className={include ? 'selected' : ''} onClick={() => { setInclude(true); setPreview(null); }}>Incluir mês inicial</button><button type="button" className={!include ? 'selected' : ''} onClick={() => { setInclude(false); setPreview(null); }}>Próxima regular</button></div>
-    {error && <div role="alert" className="alert error">{error}</div>}
+    {error && <div role="alert" className="alert error">{hidden ? 'Existe um conflito financeiro. Mostre os valores para consultar os detalhes.' : error}</div>}
     {preview && <div className="subscription-preview"><strong>Primeira cobrança: {dateLabel(preview.first_charge_date)}</strong>{!preview.can_apply && <small className="negative">{preview.reason}</small>}</div>}
     <div className="dialog-footer"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button type="button" className="button secondary" disabled={busy} onClick={review}>{busy ? 'Verificando…' : 'Calcular'}</button><button type="button" className="button primary" disabled={busy || !preview?.can_apply} onClick={apply}>Aplicar revisão</button></div>
   </dialog>;

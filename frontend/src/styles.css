@@ -58,3 +58,26 @@ h1,h2,h3,.brand,.stat>strong,.account-balance{font-family:'Manrope Variable','DM
 .tiny.forecast,.forecast-note{background:#fff5c9;color:#7a5c08}.forecast-note{padding:11px 13px;border-radius:9px;margin-top:12px;font-size:12px}.installment-choice{display:flex}
 [data-theme="dark"] :is(.payment-mode,.installment-preview){background:#1c261f;border-color:var(--border)}[data-theme="dark"] .payment-mode button.selected{background:#303b31;color:#eef2e8}[data-theme="dark"] .installment-preview .affected{background:#352921}[data-theme="dark"] .tiny.forecast,[data-theme="dark"] .forecast-note{background:#40371c;color:#efd47a}
 @media(max-width:620px){.purchase-summary,.cancel-installments{align-items:stretch;flex-direction:column}.preview-actions{align-items:flex-start;flex-direction:column}.installment-preview span{gap:7px}}
+
+.hidden-chart {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background-color: var(--card-bg);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  border: 1px dashed var(--border-color);
+  width: 100%;
+}
+
+.hidden-progress {
+  background-color: var(--border-color) !important;
+}
+
+.hidden-input {
+  width: 100%;
+  text-align: center;
+  font-size: 0.9rem;
+  margin-top: 4px;
+}

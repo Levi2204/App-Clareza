@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, LoaderCircle, Receipt, X } from 'lucide-react';
+import { MoneyValue, useValueVisibility, PrivacyButton } from './PrivacyContext';
 import { api, dateLabel, money, today } from './api';
 import { confirmAction } from './confirm';
 
@@ -74,9 +75,9 @@ export function InstallmentDialog({ data, month, close, saved }) {
         <label className="wide">Conta ou cartão<select required value={values.origin} onChange={e => change('origin', e.target.value)}><option value="">Selecione</option>{originOptions(data).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
         <label className="wide">Observação <small>· opcional</small><textarea value={values.notes} onChange={e => change('notes', e.target.value)}/></label>
       </div>
-      {error && <div role="alert" className="alert error">{error}</div>}
-      <div className="preview-actions"><button type="button" className="button secondary" disabled={previewBusy || busy} onClick={showPreview}>{previewBusy ? <><LoaderCircle className="spin" size={16}/>Calculando…</> : 'Calcular prévia'}</button>{preview && <strong>Soma: {money(preview.sum)}</strong>}</div>
-      {preview && <div className="installment-preview" aria-label="Prévia das parcelas">{preview.schedule.map(row => <div key={row.number}><span><strong>{row.number}/{preview.installment_count}</strong>{dateLabel(row.month)}</span><strong>{money(row.amount)}</strong></div>)}{preview.conflicts.map((row, index) => <p className="negative" key={index}>{row.message}</p>)}</div>}
+      {error && <div role="alert" className="alert error">{hidden ? 'Existe um conflito financeiro. Mostre os valores para consultar os detalhes.' : error}</div>}
+      <div className="preview-actions"><button type="button" className="button secondary" disabled={previewBusy || busy} onClick={showPreview}>{previewBusy ? <><LoaderCircle className="spin" size={16}/>Calculando…</> : 'Calcular prévia'}</button>{preview && <strong>Soma: <MoneyValue value={preview.sum} /></strong>}</div>
+      {preview && <div className="installment-preview" aria-label="Prévia das parcelas">{preview.schedule.map(row => <div key={row.number}><span><strong>{row.number}/{preview.installment_count}</strong>{dateLabel(row.month)}</span><strong><MoneyValue value={row.amount} /></strong></div>)}{preview.conflicts.map((row, index) => <p className="negative" key={index}>{row.message}</p>)}</div>}
       <div className="dialog-footer"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" disabled={busy || !preview?.can_create}>{busy ? 'Salvando…' : 'Confirmar parcelamento'}<Check size={16}/></button></div>
     </form>
   </dialog>;
@@ -101,10 +102,10 @@ export function InstallmentDetailsDialog({ purchaseId, close, saved }) {
   }
   return <dialog ref={dialog} className="dialog installment-dialog" onCancel={close}>
     <div className="dialog-heading"><div><span className="eyebrow">CRONOGRAMA DA COMPRA</span><h2>{purchase?.description || 'Carregando parcelamento…'}</h2></div><button type="button" className="icon-button" onClick={close} aria-label="Fechar"><X size={20}/></button></div>
-    {error && <div role="alert" className="alert error">{error}</div>}
+    {error && <div role="alert" className="alert error">{hidden ? 'Existe um conflito financeiro. Mostre os valores para consultar os detalhes.' : error}</div>}
     {!purchase ? <div className="loading"><LoaderCircle className="spin" size={20}/>Carregando…</div> : <>
-      <div className="purchase-summary"><span><Receipt size={18}/>Total original <strong>{money(purchase.total_amount)}</strong></span><span>Compra em {dateLabel(purchase.purchase_date)} · {purchase.origin}</span></div>
-      <div className="installment-preview">{purchase.schedule.map(row => { const affected = !row.cancelled && row.month.slice(0, 7) >= fromMonth; return <div className={row.cancelled ? 'cancelled' : affected ? 'affected' : ''} key={row.number}><span><strong>{row.number}/{purchase.installment_count}</strong>{dateLabel(row.month)}{row.cancelled && <small>Cancelada</small>}{affected && <small>Será cancelada</small>}</span><strong>{money(row.amount)}</strong></div>; })}</div>
+      <div className="purchase-summary"><span><Receipt size={18}/>Total original <strong><MoneyValue value={purchase.total_amount} /></strong></span><span>Compra em {dateLabel(purchase.purchase_date)} · {purchase.origin}</span></div>
+      <div className="installment-preview">{purchase.schedule.map(row => { const affected = !row.cancelled && row.month.slice(0, 7) >= fromMonth; return <div className={row.cancelled ? 'cancelled' : affected ? 'affected' : ''} key={row.number}><span><strong>{row.number}/{purchase.installment_count}</strong>{dateLabel(row.month)}{row.cancelled && <small>Cancelada</small>}{affected && <small>Será cancelada</small>}</span><strong><MoneyValue value={row.amount} /></strong></div>; })}</div>
       <div className="cancel-installments"><label>Cancelar restantes a partir de<input type="month" min={today().slice(0, 7)} value={fromMonth} onChange={e => setFromMonth(e.target.value)}/></label><button type="button" className="button danger" disabled={busy || !fromMonth} onClick={cancelRemaining}>{busy ? 'Cancelando…' : 'Cancelar restantes'}</button></div>
     </>}
   </dialog>;
