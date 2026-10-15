@@ -3,6 +3,7 @@ import { Check, LoaderCircle, Receipt, X } from 'lucide-react';
 import { MoneyValue, useValueVisibility, PrivacyButton } from './PrivacyContext';
 import { api, dateLabel, money, today } from './api';
 import { confirmAction } from './confirm';
+import { DatePicker } from './DatePicker';
 
 const requestId = () => globalThis.crypto?.randomUUID?.() || `purchase-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -69,7 +70,7 @@ export function InstallmentDialog({ data, month, close, saved }) {
         <label>Descrição<input autoFocus required value={values.description} onChange={e => change('description', e.target.value)}/></label>
         <label>Valor total (R$)<input required type="number" min=".02" step=".01" value={values.total_amount} onChange={e => change('total_amount', e.target.value)}/></label>
         <label>Quantidade de parcelas<input required type="number" min="2" max="120" value={values.installment_count} onChange={e => change('installment_count', e.target.value)}/></label>
-        <label>Data da compra<input required type="date" max={today()} value={values.purchase_date} onChange={e => change('purchase_date', e.target.value)}/></label>
+        <DatePicker id="purchase_date" name="purchase_date" label="Data da compra" required max={today()} value={values.purchase_date} onChange={val => change('purchase_date', val)} />
         <label>Primeira competência<input required type="month" value={values.first_month.slice(0, 7)} onChange={e => change('first_month', e.target.value)}/></label>
         <label>Categoria<select required value={values.category} onChange={e => change('category', e.target.value)}><option value="">Selecione</option>{data.categories.filter(row => row.is_active).map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
         <label className="wide">Conta ou cartão<select required value={values.origin} onChange={e => change('origin', e.target.value)}><option value="">Selecione</option>{originOptions(data).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>

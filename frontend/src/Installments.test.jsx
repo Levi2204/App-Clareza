@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InstallmentDialog } from './Installments';
 
@@ -57,6 +57,47 @@ describe('Compras parceladas', () => {
     await user.type(screen.getByLabelText('Valor total (R$)'), '0');
     resolve({ ok: true, status: 200, json: async () => preview });
     await waitFor(() => expect(screen.queryByText('1/3')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Confirmar parcelamento' })).toBeDisabled();
+  });
+
+  it('altera a data da compra via DatePicker e invalida a prévia existente', async () => {
+    const user = userEvent.setup();
+    fetch.mockImplementation(async url => ({
+      ok: true,
+      status: 200,
+      json: async () => preview
+    }));
+    render(<InstallmentDialog data={data} month="2026-09" close={vi.fn()} saved={vi.fn()} />);
+    await fill(user);
+    await user.click(screen.getByRole('button', { name: 'Calcular prévia' }));
+    expect(await screen.findByText('1/3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirmar parcelamento' })).toBeEnabled();
+
+    // Abre o DatePicker da Data da compra
+    const dateTrigger = screen.getByRole('button', { name: /Data da compra:/ });
+    await user.click(dateTrigger);
+    const calendarPanel = screen.getByRole('region', { name: /Calendário: Data da compra/ });
+    expect(calendarPanel).toBeInTheDocument();
+
+    // Seleciona um dia anterior (ex: dia 1)
+    const day1 = screen.getAllByRole('gridcell').find(el => el.textContent === '1' && !el.disabled);
+    expect(day1).toBeDefined();
+    await user.click(day1);
+
+    // Clica em Cancelar: a prévia deve continuar intacta
+    await user.click(within(calendarPanel).getByRole('button', { name: 'Cancelar' }));
+    expect(screen.getByText('1/3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirmar parcelamento' })).toBeEnabled();
+
+    // Reabre, seleciona dia 1 e clica em Confirmar data
+    await user.click(dateTrigger);
+    const calendarPanel2 = screen.getByRole('region', { name: /Calendário: Data da compra/ });
+    const day1Reopen = screen.getAllByRole('gridcell').find(el => el.textContent === '1' && !el.disabled);
+    await user.click(day1Reopen);
+    await user.click(within(calendarPanel2).getByRole('button', { name: 'Confirmar data' }));
+
+    // A prévia deve ter sido invalidada
+    expect(screen.queryByText('1/3')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Confirmar parcelamento' })).toBeDisabled();
   });
 });

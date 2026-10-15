@@ -123,4 +123,113 @@ describe('Fluxos principais', () => {
     expect(screen.getByText(/Competência 08\/2026/)).toBeInTheDocument();
     expect(screen.getByText('2026')).toBeInTheDocument();
   });
+  it('seleciona e confirma data no formulário de movimentação sem salvar ou fechar o diálogo', async () => {
+    const user = userEvent.setup();
+    history.replaceState({}, '', '/transactions');
+    render(<App />);
+    await screen.findByText('Movimentações do mês');
+    await user.click(screen.getByRole('button', { name: 'Nova movimentação' }));
+
+    expect(screen.getByRole('heading', { name: 'Adicionar movimentação' })).toBeInTheDocument();
+
+    const dateTrigger = screen.getByRole('button', { name: /Data:/ });
+    await user.click(dateTrigger);
+
+    expect(screen.getByRole('region', { name: /Calendário: Data/ })).toBeInTheDocument();
+
+    const dayBtn = screen.getAllByRole('gridcell').find(el => el.textContent === '10');
+    expect(dayBtn).toBeDefined();
+    await user.click(dayBtn);
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar data' }));
+
+    expect(screen.queryByRole('region', { name: /Calendário: Data/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Adicionar movimentação' })).toBeInTheDocument();
+    expect(fetch.mock.calls.some(([url, opt]) => url.includes('transactions') && opt?.method === 'POST')).toBe(false);
+    expect(dateTrigger).toHaveTextContent(/10\/\d\d\/\d\d\d\d/);
+  });
+
+  it('integração completa: preenche campos, altera data via calendário, confirma e salva sem perda de dados', async () => {
+    const user = userEvent.setup();
+    history.replaceState({}, '', '/transactions');
+    fetch.mockImplementation(async url => ({
+      ok: true,
+      json: async () => {
+        if (url.includes('dashboard')) return summary;
+        if (url.includes('accounts')) return [{ id: 1, name: 'Conta Principal', is_active: true }];
+        if (url.includes('categories')) return [{ id: 1, name: 'Alimentação', is_active: true }];
+        return [];
+      }
+    }));
+    render(<App />);
+    await screen.findByText('Movimentações do mês');
+    await user.click(screen.getByRole('button', { name: 'Nova movimentação' }));
+
+    // Preenche descrição e valor
+    await user.type(screen.getByLabelText('Descrição'), 'Compra de teste');
+    await user.type(screen.getByLabelText('Valor (R$)'), '50');
+
+    const dateTrigger = screen.getByRole('button', { name: /Data:/ });
+    const originalDateText = dateTrigger.textContent;
+
+    // Abre o calendário
+    await user.click(dateTrigger);
+    expect(screen.getByRole('region', { name: /Calendário: Data/ })).toBeInTheDocument();
+
+    // Seleciona um dia diferente
+    const dayBtn = screen.getAllByRole('gridcell').find(el => el.textContent === '15');
+    await user.click(dayBtn);
+
+    // Sem confirmar, o botão acionador ainda mantém o texto original
+    expect(dateTrigger).toHaveTextContent(originalDateText);
+
+    // Clica em Confirmar data
+    await user.click(screen.getByRole('button', { name: 'Confirmar data' }));
+
+    // Diálogo da movimentação permanece aberto com dados intactos e sem POST
+    expect(screen.getByRole('heading', { name: 'Adicionar movimentação' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Descrição')).toHaveValue('Compra de teste');
+    expect(screen.getByLabelText('Valor (R$)')).toHaveValue(50);
+    expect(fetch.mock.calls.filter(([url, opt]) => url === '/api/v1/transactions/' && opt?.method === 'POST').length).toBe(0);
+
+    // Seleciona conta e categoria para poder salvar
+    await user.selectOptions(screen.getByLabelText('Conta ou cartão'), 'account:1');
+    await user.selectOptions(screen.getByLabelText('Categoria'), '1');
+
+    // Salva a movimentação
+    await user.click(screen.getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() => {
+      const calls = fetch.mock.calls.filter(([url, opt]) => url === '/api/v1/transactions/' && opt?.method === 'POST');
+      expect(calls.length).toBe(1);
+      const body = JSON.parse(calls[0][1].body);
+      expect(body).toMatchObject({
+        description: 'Compra de teste',
+        amount: '50',
+        date: expect.stringMatching(/-\d{2}-15/)
+      });
+    });
+  });
+
+  it('clicar fora do calendário fecha apenas o calendário sem fechar a janela do formulário', async () => {
+    const user = userEvent.setup();
+    history.replaceState({}, '', '/transactions');
+    render(<App />);
+    await screen.findByText('Movimentações do mês');
+    await user.click(screen.getByRole('button', { name: 'Nova movimentação' }));
+
+    const dateTrigger = screen.getByRole('button', { name: /Data:/ });
+    await user.click(dateTrigger);
+
+    expect(screen.getByRole('region', { name: /Calendário: Data/ })).toBeInTheDocument();
+
+    // Dispara clique fora do calendário (ex: no título do formulário)
+    await user.click(screen.getByRole('heading', { name: 'Adicionar movimentação' }));
+
+    // O painel do calendário deve fechar
+    expect(screen.queryByRole('region', { name: /Calendário: Data/ })).not.toBeInTheDocument();
+
+    // O formulário de movimentação continua aberto
+    expect(screen.getByRole('heading', { name: 'Adicionar movimentação' })).toBeInTheDocument();
+  });
 });

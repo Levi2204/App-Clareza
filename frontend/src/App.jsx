@@ -2,6 +2,7 @@ import ProfilePage, { Avatar } from './Profile';
 import { InstallmentDialog, InstallmentDetailsDialog } from './Installments';
 import { SubscriptionDialog, ReviewFirstChargeDialog } from './Subscriptions';
 import { confirmAction } from './confirm';
+import { DatePicker } from './DatePicker';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LayoutDashboard, Wallet, CreditCard, ArrowLeftRight, Receipt, Repeat2, Target, ChartNoAxesCombined, CalendarClock, History, Plus, ArrowUpRight, ArrowDownRight, ArrowRight, ChevronLeft, ChevronRight, X, Check, Pencil, Trash2, Bell, Search, Menu, Landmark, CircleHelp, LoaderCircle, ChevronDown, Sun, CheckCircle2, AlertCircle, LogOut } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
@@ -165,16 +166,38 @@ function FormDialog({
     {type === 'accounts' && <p className="form-note">O saldo é uma posição informada manualmente. Movimentações e pagamentos não alteram esse valor automaticamente.</p>}
     {type === 'contributions' && <p className="form-note">Aportes registram o progresso da meta. Se o dinheiro já está em uma conta ou reserva, ele já faz parte dos seus ativos.</p>}
     {type === 'transactions' && !item.id && values.kind === 'expense' && <div className="payment-mode" role="group" aria-label="Forma de pagamento"><button type="button" className="selected">À vista</button><button type="button" onClick={switchToInstallments}>Parcelada</button></div>}
-    <div className="form-grid">{fields.map(f => <label className={f.type === 'textarea' || f.hint ? 'wide' : ''} key={f.name}>{f.label}{f.optional && <small> · opcional</small>}{f.type === 'select' ? <select required={!f.optional} value={values[f.name] ?? ''} onChange={e => setValues({
-            ...values,
-            [f.name]: e.target.value
-          })}><option value="">Selecione</option>{f.options.map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select> : f.type === 'textarea' ? <textarea value={values[f.name] || ''} onChange={e => setValues({
-            ...values,
-            [f.name]: e.target.value
-          })} /> : <input autoFocus={f === fields[0]} required={!f.optional} disabled={f.disabled} type={f.type} min={f.min} max={f.max} step={f.step} value={f.type === 'month' ? (values[f.name] || '').slice(0, 7) : values[f.name] ?? ''} onChange={e => setValues({
-            ...values,
-            [f.name]: e.target.value
-          })} />}{f.hint && <small className="hint">{f.hint}</small>}</label>)}</div>
+    <div className="form-grid">{fields.map(f => {
+      if (f.type === 'date') {
+        return (
+          <DatePicker
+            key={f.name}
+            id={f.name}
+            name={f.name}
+            label={f.label}
+            value={values[f.name] ?? ''}
+            onChange={val => setValues(prev => ({ ...prev, [f.name]: val }))}
+            optional={f.optional}
+            disabled={f.disabled}
+            min={f.min}
+            max={f.max}
+            hint={f.hint}
+            autoFocus={f === fields[0]}
+          />
+        );
+      }
+      return (
+        <label className={f.type === 'textarea' || f.hint ? 'wide' : ''} key={f.name}>{f.label}{f.optional && <small> · opcional</small>}{f.type === 'select' ? <select required={!f.optional} value={values[f.name] ?? ''} onChange={e => setValues({
+              ...values,
+              [f.name]: e.target.value
+            })}><option value="">Selecione</option>{f.options.map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select> : f.type === 'textarea' ? <textarea value={values[f.name] || ''} onChange={e => setValues({
+              ...values,
+              [f.name]: e.target.value
+            })} /> : <input autoFocus={f === fields[0]} required={!f.optional} disabled={f.disabled} type={f.type} min={f.min} max={f.max} step={f.step} value={f.type === 'month' ? (values[f.name] || '').slice(0, 7) : values[f.name] ?? ''} onChange={e => setValues({
+              ...values,
+              [f.name]: e.target.value
+            })} />}{f.hint && <small className="hint">{f.hint}</small>}</label>
+      );
+    })}</div>
     {error && <div role="alert" className="alert error">{hidden ? 'Existe um conflito financeiro. Mostre os valores para consultar os detalhes.' : error}</div>}<div className="dialog-footer"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" disabled={busy}>{busy ? 'Salvando…' : 'Salvar'}<Check size={16} /></button></div>
   </form></dialog>;
 }
