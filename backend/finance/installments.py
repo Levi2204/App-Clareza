@@ -8,6 +8,7 @@ from django.utils import timezone
 from rest_framework.exceptions import APIException, ValidationError
 
 from . import models as m
+from .card_cycle import calculate_due_date, cycle_closing_date
 
 MAX_INSTALLMENTS = 120
 
@@ -26,6 +27,13 @@ def installment_date(purchase_date, month):
     return month.replace(day=min(purchase_date.day, calendar.monthrange(month.year, month.month)[1]))
 
 
+def scheduled_card_date(purchase_date, offset):
+    index = purchase_date.year * 12 + purchase_date.month - 1 + offset
+    year, month_index = divmod(index, 12)
+    month = month_index + 1
+    return date(year, month, min(purchase_date.day, calendar.monthrange(year, month)[1]))
+
+
 def split_amount(total_amount, count):
     cents = int(total_amount * 100)
     if count < 2 or count > MAX_INSTALLMENTS:
@@ -39,15 +47,23 @@ def split_amount(total_amount, count):
 def schedule_for(values):
     amounts = split_amount(values['total_amount'], values['installment_count'])
     first = values['first_month'].replace(day=1)
-    return [
-        {
+    card = values.get('card')
+    schedule = []
+    for index, amount in enumerate(amounts):
+        month = add_months(first, index)
+        row = {
             'number': index + 1,
-            'month': add_months(first, index),
-            'date': installment_date(values['purchase_date'], add_months(first, index)),
+            'month': month,
+            'date': scheduled_card_date(values['purchase_date'], index) if card else installment_date(values['purchase_date'], month),
             'amount': amount,
         }
-        for index, amount in enumerate(amounts)
-    ]
+        if card:
+            row.update({
+                'closing_date': cycle_closing_date(month, card.closing_day),
+                'due_date': calculate_due_date(month, card.closing_day, card.due_day),
+            })
+        schedule.append(row)
+    return schedule
 
 
 def _invoice_conflicts(user, card, schedule, lock=False):
@@ -63,6 +79,10 @@ def _invoice_conflicts(user, card, schedule, lock=False):
         if not invoice:
             continue
         label = row['month'].strftime('%m/%Y')
+        from .services import invoice_cycle_conflict
+        cycle_conflict = invoice_cycle_conflict(invoice, card, row['month'])
+        if cycle_conflict:
+            conflicts.append({'month': row['month'], 'kind': 'cycle', 'message': cycle_conflict})
         if invoice.paid_on:
             conflicts.append({'month': row['month'], 'kind': 'paid_invoice', 'message': f'A fatura de {card.name} em {label} está paga. Reabra-a antes de parcelar.'})
         detailed = sum((item.amount for item in invoice.transactions.all()), Decimal('0.00'))
@@ -74,8 +94,11 @@ def _invoice_conflicts(user, card, schedule, lock=False):
 def preview(user, values):
     schedule = schedule_for(values)
     conflicts = _invoice_conflicts(user, values.get('card'), schedule)
+    public_schedule = [{**row, 'cancelled': False} for row in schedule]
+    if values.get('card'):
+        public_schedule = [_serialize_card_schedule_row(row) for row in public_schedule]
     return {
-        'schedule': schedule,
+        'schedule': public_schedule,
         'total_amount': values['total_amount'],
         'installment_count': values['installment_count'],
         'sum': sum((row['amount'] for row in schedule), Decimal('0.00')),
@@ -85,7 +108,9 @@ def preview(user, values):
 
 
 def _same_payload(purchase, values):
-    comparable = ['description', 'notes', 'total_amount', 'installment_count', 'purchase_date', 'first_month']
+    comparable = ['description', 'notes', 'total_amount', 'installment_count', 'purchase_date']
+    if not purchase.card_id:
+        comparable.append('first_month')
     return all(getattr(purchase, key) == values.get(key, '' if key == 'notes' else None) for key in comparable) and purchase.category_id == values['category'].id and purchase.account_id == getattr(values.get('account'), 'id', None) and purchase.card_id == getattr(values.get('card'), 'id', None)
 
 
@@ -113,12 +138,8 @@ def create_purchase(user, values):
     for row in schedule:
         invoice = None
         if purchase.card:
-            invoice, _ = m.Invoice.objects.get_or_create(
-                user=user,
-                card=purchase.card,
-                month=row['month'],
-                defaults={'due_date': row['month'].replace(day=min(purchase.card.due_day, calendar.monthrange(row['month'].year, row['month'].month)[1]))},
-            )
+            from .services import ensure_invoice
+            invoice = ensure_invoice(user, purchase.card, row['month'])
         m.Transaction.objects.create(
             user=user,
             description=purchase.description,
@@ -143,19 +164,33 @@ def purchase_data(purchase):
         'installment_count': purchase.installment_count,
         'purchase_date': purchase.purchase_date,
         'first_month': purchase.first_month,
+        'card': purchase.card,
     })
     transactions = {row.installment_number: row for row in purchase.installments.all()}
+    invoices = {
+        invoice.month: invoice
+        for invoice in m.Invoice.objects.filter(
+            user=purchase.user,
+            card=purchase.card,
+            month__in=[row['month'] for row in original],
+        )
+    } if purchase.card else {}
     schedule = []
     maintained = Decimal('0.00')
     cancelled = Decimal('0.00')
     for row in original:
         item = transactions.get(row['number'])
+        invoice = invoices.get(row['month'])
+        if invoice:
+            row['closing_date'] = invoice.cycle_closing_date or row.get('closing_date')
+            row['due_date'] = invoice.due_date
         is_cancelled = item is None and purchase.cancelled_from_month is not None and row['month'] >= purchase.cancelled_from_month
         if is_cancelled:
             cancelled += row['amount']
         else:
             maintained += row['amount']
-        schedule.append({**row, 'transaction_id': item.id if item else None, 'cancelled': is_cancelled})
+        public_row = {**row, 'cancelled': is_cancelled}
+        schedule.append(_serialize_card_schedule_row(public_row) if purchase.card else public_row)
     return {
         'id': purchase.id,
         'description': purchase.description,
@@ -175,6 +210,13 @@ def purchase_data(purchase):
         'maintained_total': maintained,
         'cancelled_total': cancelled,
         'schedule': schedule,
+    }
+
+
+def _serialize_card_schedule_row(row):
+    return {
+        key: value.isoformat() if isinstance(value, date) else value
+        for key, value in row.items()
     }
 
 

@@ -51,7 +51,7 @@ Abra **http://localhost:5173**. A API usa **http://127.0.0.1:8000/api/v1/** e o 
 ## Funcionalidades
 
 - Dashboard: ativos, passivos, patrimônio, gastos por categoria, evolução, vencimentos e planejamento.
-- Contas e cartões: cadastro, edição, arquivamento, saldos mensais e visão por origem.
+- Contas e cartões: cadastro, edição, arquivamento, saldos mensais, visão por origem e competência calculada pelo fechamento.
 - Movimentações: despesas e receitas, categorias, edição, exclusão com confirmação, busca e filtros.
 - Compras parceladas: divisão exata em até 120 parcelas, prévia antes de salvar, cronograma mensal e cancelamento das parcelas restantes.
 - Faturas: cálculo por cartão, total manual opcional, pagamento e reabertura.
@@ -69,14 +69,15 @@ npm --prefix frontend test
 .venv/bin/python scripts/check-desktop-runtime.py --service frontend/src-tauri/service/clareza-service/clareza-service
 ```
 
-O teste Django usa um SQLite de teste separado. A suíte cobre também primeira cobrança, agenda por competência, passivos históricos, arredondamento, idempotência, projeções, faturas manuais e cancelamentos. A integração cria dados temporários, move o serviço congelado, remove o Python do PATH e verifica inicialização, autenticação, primeira cobrança, agenda mensal, parcelamento, projeção, persistência após reinício, backup e encerramento.
+O teste Django usa um SQLite de teste separado. A suíte cobre também fechamento e vencimento de cartão, primeira cobrança, agenda por competência, passivos históricos, arredondamento, idempotência, projeções, faturas manuais e cancelamentos. A integração cria dados temporários, move o serviço congelado, remove o Python do PATH e verifica inicialização, autenticação, competência automática de compras simples e parceladas, primeira cobrança, agenda mensal, projeção, persistência após reinício, backup e encerramento.
 
 ## Decisões importantes
 
 - **Saldo manual:** movimentações e pagamentos não alteram automaticamente saldos. Atualize o saldo da conta para a competência desejada.
 - **Aportes:** registram quanto foi destinado à meta; não criam novos ativos nem transferem dinheiro. Registre reservas como contas para incluí-las no patrimônio.
 - **Faturas:** um total manual substitui a soma detalhada. O detalhamento não pode ultrapassá-lo.
-- **Competência:** é selecionada explicitamente; o dia de fechamento é informativo na V1.
+- **Competência:** em conta, é selecionada explicitamente. Em cartão, o servidor calcula pela data da compra: antes do fechamento entra na fatura do mês anterior; no dia do fechamento começa o novo ciclo.
+- **Vencimento da fatura:** novos ciclos automáticos vencem depois do fechamento, respeitando dias inexistentes em meses curtos. Faturas antigas não são reescritas silenciosamente.
 - **Parcelamento:** o valor informado é o total da compra. Cada parcela é um compromisso persistido na sua competência; não existe débito adicional pelo valor total.
 - **Projeções:** assinaturas futuras aparecem nas análises sem criar movimentações antecipadas. Valores previstos não reduzem o patrimônio atual.
 - **Modo pessoal:** acesso automático somente em loopback, com rejeição de origens externas. Não há tela de login na V1. Cada registro pertence a um usuário; `LOCAL_MODE=0` exige autenticação de sessão. Não expor este servidor de desenvolvimento na rede.

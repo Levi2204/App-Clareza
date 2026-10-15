@@ -51,6 +51,8 @@ class Invoice(Owned):
     card = models.ForeignKey(Card, on_delete=models.PROTECT, related_name='invoices')
     month = models.DateField()
     due_date = models.DateField()
+    cycle_closing_date = models.DateField(null=True, blank=True)
+    cycle_policy = models.CharField(max_length=30, blank=True)
     manual_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)])
     paid_on = models.DateField(null=True, blank=True)
     class Meta:

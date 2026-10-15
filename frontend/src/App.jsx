@@ -64,6 +64,8 @@ function FormDialog({
   const [values, setValues] = useState(initial);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [transactionPreview, setTransactionPreview] = useState(null);
+  const transactionPreviewKey = useRef('');
   const options = key => data[key].filter(x => x.is_active !== false || x.id === item[key === 'accounts' ? 'account' : key === 'cards' ? 'card' : 'category']).map(x => [x.id, x.name]);
   const origin = field('origin', 'Conta ou cartão', 'select', {
     options: [...options('accounts').map(([id, n]) => [`account:${id}`, `Conta · ${n}`]), ...options('cards').map(([id, n]) => [`card:${id}`, `Cartão · ${n}`])]
@@ -79,6 +81,7 @@ function FormDialog({
     step: '.01'
   });
   const competency = field('month', 'Competência', 'month');
+  const transactionUsesCard = type === 'transactions' && String(values.origin || '').startsWith('card:');
   let fields = {
     accounts: [field('name', 'Nome da conta'), field('institution', 'Instituição', 'text', {
       optional: true
@@ -97,7 +100,7 @@ function FormDialog({
     })],
     transactions: [field('description', 'Descrição'), amount, field('kind', 'Tipo', 'select', {
       options: [['expense', 'Despesa'], ['income', 'Receita']]
-    }), origin, category, field('date', 'Data', 'date'), competency, field('notes', 'Observação', 'textarea', {
+    }), origin, category, field('date', 'Data', 'date'), ...(!transactionUsesCard ? [competency] : []), field('notes', 'Observação', 'textarea', {
       optional: true
     })],
     invoices: [field('card', 'Cartão', 'select', {
@@ -132,6 +135,23 @@ function FormDialog({
   useEffect(() => {
     dialog.current.showModal();
   }, []);
+  useEffect(() => {
+    if (!transactionUsesCard || values.kind !== 'expense' || !values.date) {
+      transactionPreviewKey.current = '';
+      setTransactionPreview(null);
+      return;
+    }
+    const card = Number(values.origin.split(':')[1]);
+    const previewPayload = { card, date: values.date };
+    if (Number(values.amount) > 0) previewPayload.amount = values.amount;
+    const key = JSON.stringify(previewPayload);
+    transactionPreviewKey.current = key;
+    api('transactions/preview/', { method: 'POST', body: key }).then(result => {
+      if (transactionPreviewKey.current === key && result && !Array.isArray(result)) setTransactionPreview(result);
+    }).catch(previewError => {
+      if (transactionPreviewKey.current === key) setTransactionPreview({ error: previewError.message, can_create: false });
+    });
+  }, [transactionUsesCard, values.origin, values.date, values.kind, values.amount]);
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
@@ -145,6 +165,11 @@ function FormDialog({
         payload.account = kind === 'account' ? Number(id) : null;
         payload.card = kind === 'card' ? Number(id) : null;
       } else payload[f.name] = v === '' || v == null ? f.name === 'manual_amount' ? null : '' : v;
+    }
+    if (transactionUsesCard && transactionPreview?.can_create === false) {
+      setError(transactionPreview.error || transactionPreview.conflicts?.[0] || 'Revise a fatura antes de salvar.');
+      setBusy(false);
+      return;
     }
     try {
       const url = type === 'contributions' ? `goals/${modal.goalId}/contributions/` : `${type}/${item.id ? `${item.id}/` : ''}`;
@@ -198,6 +223,7 @@ function FormDialog({
             })} />}{f.hint && <small className="hint">{f.hint}</small>}</label>
       );
     })}</div>
+    {transactionUsesCard && <div className="form-note"><strong>Competência calculada pelo fechamento</strong><br/>{transactionPreview?.destination || 'A competência será calculada a partir da data da compra e do cartão.'}{transactionPreview?.due_date && <> · vencimento {dateLabel(transactionPreview.due_date)}</>}<br/><small>Compras anteriores ao fechamento entram na fatura do mês anterior; no dia do fechamento começa o próximo ciclo.</small></div>}
     {error && <div role="alert" className="alert error">{hidden ? 'Existe um conflito financeiro. Mostre os valores para consultar os detalhes.' : error}</div>}<div className="dialog-footer"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" disabled={busy}>{busy ? 'Salvando…' : 'Salvar'}<Check size={16} /></button></div>
   </form></dialog>;
 }

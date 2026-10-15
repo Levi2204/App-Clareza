@@ -4,6 +4,7 @@ from rest_framework import serializers
 from . import models as m, services as s
 from .installments import MAX_INSTALLMENTS
 from .subscription_calendar import choose_first_charge
+from .card_cycle import card_competence
 
 
 class OwnedSerializer(serializers.ModelSerializer):
@@ -120,6 +121,7 @@ class SubscriptionSerializer(OwnedSerializer):
         return super().update(instance, validated_data)
 
 class TransactionSerializer(OwnedSerializer):
+    month = serializers.DateField(required=False)
     origin = serializers.SerializerMethodField()
     category_name = serializers.CharField(source='category.name', read_only=True)
     def get_origin(self, obj):
@@ -128,6 +130,41 @@ class TransactionSerializer(OwnedSerializer):
         model = m.Transaction
         fields = '__all__'
         read_only_fields = ['user', 'created_at', 'invoice', 'subscription', 'installment_purchase', 'installment_number']
+        validators = []
+
+    def validate(self, attrs):
+        supplied_month = 'month' in attrs
+        attrs = super().validate(attrs)
+        instance = self.instance
+        card = attrs.get('card', instance.card if instance else None)
+        purchase_date = attrs.get('date', instance.date if instance else None)
+        should_classify = card and (instance is None or 'date' in attrs or 'card' in attrs)
+        if should_classify and purchase_date:
+            expected = card_competence(purchase_date, card.closing_day)
+            if supplied_month and attrs['month'] != expected:
+                raise serializers.ValidationError({
+                    'month': f'A competência correta para esta compra é {expected:%m/%Y}, conforme o fechamento do cartão.',
+                })
+            attrs['month'] = expected
+        elif card and supplied_month and attrs['month'] != instance.month:
+            raise serializers.ValidationError({'month': 'A competência de uma compra no cartão é calculada pela data e pelo fechamento.'})
+        elif instance is None and not card and 'month' not in attrs:
+            raise serializers.ValidationError({'month': 'Informe a competência da movimentação em conta.'})
+        return attrs
+
+
+class CardTransactionPreviewSerializer(serializers.Serializer):
+    card = serializers.PrimaryKeyRelatedField(queryset=m.Card.objects.all())
+    date = serializers.DateField()
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal('0.01'), required=False)
+
+    def validate(self, attrs):
+        card = attrs['card']
+        if card.user_id != self.context['request'].user.id:
+            raise serializers.ValidationError({'card': 'Este registro não pertence ao usuário.'})
+        if not card.is_active:
+            raise serializers.ValidationError({'card': 'Selecione um cartão ativo.'})
+        return attrs
 
 class InvoiceSerializer(OwnedSerializer):
     total = serializers.SerializerMethodField()
@@ -137,7 +174,7 @@ class InvoiceSerializer(OwnedSerializer):
     class Meta:
         model = m.Invoice
         fields = '__all__'
-        read_only_fields = ['user', 'created_at']
+        read_only_fields = ['user', 'created_at', 'cycle_closing_date', 'cycle_policy']
 
 
 class InstallmentPurchaseInputSerializer(serializers.Serializer):
@@ -147,7 +184,7 @@ class InstallmentPurchaseInputSerializer(serializers.Serializer):
     total_amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal('0.01'))
     installment_count = serializers.IntegerField(min_value=2, max_value=MAX_INSTALLMENTS)
     purchase_date = serializers.DateField()
-    first_month = serializers.DateField()
+    first_month = serializers.DateField(required=False)
     category = serializers.PrimaryKeyRelatedField(queryset=m.Category.objects.all())
     account = serializers.PrimaryKeyRelatedField(queryset=m.Account.objects.all(), required=False, allow_null=True)
     card = serializers.PrimaryKeyRelatedField(queryset=m.Card.objects.all(), required=False, allow_null=True)
@@ -166,11 +203,21 @@ class InstallmentPurchaseInputSerializer(serializers.Serializer):
                 raise serializers.ValidationError({field: 'Este registro não pertence ao usuário.'})
             if obj and not obj.is_active:
                 raise serializers.ValidationError({field: 'Selecione um cadastro ativo.'})
-        attrs['first_month'] = attrs['first_month'].replace(day=1)
         if attrs['purchase_date'] > timezone.localdate():
             raise serializers.ValidationError({'purchase_date': 'A data da compra não pode estar no futuro.'})
-        if attrs['first_month'] < attrs['purchase_date'].replace(day=1):
-            raise serializers.ValidationError({'first_month': 'A primeira parcela não pode ser anterior ao mês da compra.'})
+        if card:
+            expected = card_competence(attrs['purchase_date'], card.closing_day)
+            if attrs.get('first_month') and attrs['first_month'].replace(day=1) != expected:
+                raise serializers.ValidationError({
+                    'first_month': f'A primeira competência correta é {expected:%m/%Y}, conforme o fechamento do cartão.',
+                })
+            attrs['first_month'] = expected
+        else:
+            if not attrs.get('first_month'):
+                raise serializers.ValidationError({'first_month': 'Informe a primeira competência.'})
+            attrs['first_month'] = attrs['first_month'].replace(day=1)
+            if attrs['first_month'] < attrs['purchase_date'].replace(day=1):
+                raise serializers.ValidationError({'first_month': 'A primeira parcela não pode ser anterior ao mês da compra.'})
         if self.context.get('require_request_id') and not attrs.get('request_id'):
             raise serializers.ValidationError({'request_id': 'Identificador da tentativa é obrigatório.'})
         return attrs

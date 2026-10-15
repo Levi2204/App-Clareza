@@ -138,8 +138,8 @@ class FinanceTests(TestCase):
         self.assertEqual(s.due(date(2026, 2, 1), 31), date(2026, 2, 28))
         self.expense(account=None, card=self.card.id)
         rows = s.payments(self.user, self.month)
-        self.assertEqual(rows[0]['status'], 'overdue')
-        self.assertEqual(rows[0]['due_date'], date(2026, 9, 12))
+        self.assertEqual(rows[0]['status'], 'pending')
+        self.assertEqual(rows[0]['due_date'], date(2026, 10, 12))
     def test_api_authentication_filters_and_history(self):
         self.expense()
         for url in ['/api/v1/dashboard/?year=2026&month=9', '/api/v1/history/2026/9/', '/api/v1/planning/2026/9/', '/api/v1/invoices/consolidated/']:

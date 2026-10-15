@@ -184,7 +184,12 @@ class InstallmentProjectionTests(TestCase):
         self.assertEqual(sum(item['amount'] for item in row['categories']), row['expenses'])
 
     def test_future_installment_is_not_current_liability(self):
-        self.create(first_month='2026-11-01', account=None, card=self.card.id)
+        with patch('django.utils.timezone.localdate', return_value=date(2026, 11, 15)):
+            response = self.create(
+                purchase_date='2026-11-15', first_month='2026-11-01',
+                account=None, card=self.card.id,
+            )
+        self.assertEqual(response.status_code, 201, response.data)
         row = s.summary(self.user, date(2026, 11, 1))
         self.assertEqual(row['expenses'], 100)
         self.assertEqual(row['liabilities'], 0)

@@ -15,6 +15,7 @@ function originOptions(data) {
 }
 
 export function InstallmentDialog({ data, month, close, saved }) {
+  const { hidden } = useValueVisibility();
   const dialog = useRef(null);
   const previewKey = useRef('');
   const [values, setValues] = useState({
@@ -29,14 +30,17 @@ export function InstallmentDialog({ data, month, close, saved }) {
   const change = (name, value) => { setValues(current => ({ ...current, [name]: value })); setPreview(null); setPreviewBusy(false); previewKey.current = ''; };
   const payload = () => {
     const [kind, id] = values.origin.split(':');
-    return {
+    const result = {
       ...values,
       installment_count: Number(values.installment_count),
-      first_month: `${values.first_month.slice(0, 7)}-01`,
       category: Number(values.category),
       account: kind === 'account' ? Number(id) : null,
       card: kind === 'card' ? Number(id) : null,
     };
+    if (kind === 'account') result.first_month = `${values.first_month.slice(0, 7)}-01`;
+    else delete result.first_month;
+    delete result.origin;
+    return result;
   };
   async function showPreview() {
     setPreviewBusy(true); setError('');
@@ -71,14 +75,14 @@ export function InstallmentDialog({ data, month, close, saved }) {
         <label>Valor total (R$)<input required type="number" min=".02" step=".01" value={values.total_amount} onChange={e => change('total_amount', e.target.value)}/></label>
         <label>Quantidade de parcelas<input required type="number" min="2" max="120" value={values.installment_count} onChange={e => change('installment_count', e.target.value)}/></label>
         <DatePicker id="purchase_date" name="purchase_date" label="Data da compra" required max={today()} value={values.purchase_date} onChange={val => change('purchase_date', val)} />
-        <label>Primeira competência<input required type="month" value={values.first_month.slice(0, 7)} onChange={e => change('first_month', e.target.value)}/></label>
+        {values.origin.startsWith('card:') ? <div className="form-note"><strong>Competência calculada pelo cartão</strong><br/>Compras anteriores ao fechamento entram na fatura do mês anterior; no dia do fechamento começa o próximo ciclo.</div> : <label>Primeira competência<input required type="month" value={values.first_month.slice(0, 7)} onChange={e => change('first_month', e.target.value)}/></label>}
         <label>Categoria<select required value={values.category} onChange={e => change('category', e.target.value)}><option value="">Selecione</option>{data.categories.filter(row => row.is_active).map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
         <label className="wide">Conta ou cartão<select required value={values.origin} onChange={e => change('origin', e.target.value)}><option value="">Selecione</option>{originOptions(data).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
         <label className="wide">Observação <small>· opcional</small><textarea value={values.notes} onChange={e => change('notes', e.target.value)}/></label>
       </div>
       {error && <div role="alert" className="alert error">{hidden ? 'Existe um conflito financeiro. Mostre os valores para consultar os detalhes.' : error}</div>}
       <div className="preview-actions"><button type="button" className="button secondary" disabled={previewBusy || busy} onClick={showPreview}>{previewBusy ? <><LoaderCircle className="spin" size={16}/>Calculando…</> : 'Calcular prévia'}</button>{preview && <strong>Soma: <MoneyValue value={preview.sum} /></strong>}</div>
-      {preview && <div className="installment-preview" aria-label="Prévia das parcelas">{preview.schedule.map(row => <div key={row.number}><span><strong>{row.number}/{preview.installment_count}</strong>{dateLabel(row.month)}</span><strong><MoneyValue value={row.amount} /></strong></div>)}{preview.conflicts.map((row, index) => <p className="negative" key={index}>{row.message}</p>)}</div>}
+      {preview && <div className="installment-preview" aria-label="Prévia das parcelas">{preview.schedule.map(row => <div key={row.number}><span><strong>{row.number}/{preview.installment_count}</strong><span>Fatura {dateLabel(row.month).slice(3)} · compra em {dateLabel(row.date)}</span>{row.due_date && <small>Vencimento {dateLabel(row.due_date)}</small>}</span><strong><MoneyValue value={row.amount} /></strong></div>)}{preview.conflicts.map((row, index) => <p className="negative" key={index}>{row.message}</p>)}</div>}
       <div className="dialog-footer"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" disabled={busy || !preview?.can_create}>{busy ? 'Salvando…' : 'Confirmar parcelamento'}<Check size={16}/></button></div>
     </form>
   </dialog>;

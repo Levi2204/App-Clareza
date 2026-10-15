@@ -117,6 +117,9 @@ class TransactionViewSet(BaseViewSet):
         invoice = s.ensure_invoice(self.request.user, card, month) if card else None
         if invoice:
             invoice = m.Invoice.objects.select_for_update().get(pk=invoice.pk)
+            cycle_conflict = s.invoice_cycle_conflict(invoice, card, month) if old is None or 'date' in data or 'card' in data else None
+            if cycle_conflict:
+                raise ValidationError({'invoice': cycle_conflict})
             subtotal = s.total(invoice.transactions.exclude(pk=old.pk if old else None))
             amount = data.get('amount', old.amount if old else Decimal(0))
             if invoice.paid_on:
@@ -128,6 +131,39 @@ class TransactionViewSet(BaseViewSet):
         serializer.save(user=self.request.user, invoice=invoice)
     perform_create = save_transaction
     perform_update = save_transaction
+    @action(detail=False, methods=['post'])
+    def preview(self, request):
+        serializer = ser.CardTransactionPreviewSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        card = serializer.validated_data['card']
+        purchase_date = serializer.validated_data['date']
+        from .card_cycle import card_competence, cycle_closing_date, calculate_due_date
+        month = card_competence(purchase_date, card.closing_day)
+        closing = cycle_closing_date(month, card.closing_day)
+        due_date = calculate_due_date(month, card.closing_day, card.due_day)
+        invoice = m.Invoice.objects.filter(user=request.user, card=card, month=month).first()
+        conflicts = []
+        cycle_conflict = s.invoice_cycle_conflict(invoice, card, month) if invoice else None
+        if cycle_conflict:
+            conflicts.append(cycle_conflict)
+        if invoice and invoice.paid_on:
+            conflicts.append(f'A fatura de {card.name} em {month:%m/%Y} está paga. Reabra-a antes de registrar a compra.')
+        amount = serializer.validated_data.get('amount')
+        if invoice and amount is not None and invoice.manual_amount is not None:
+            detailed = s.total(invoice.transactions.all())
+            if detailed + amount > invoice.manual_amount:
+                conflicts.append(f'O total manual da fatura de {card.name} em {month:%m/%Y} não comporta a compra.')
+        return Response({
+            'card': card.id,
+            'card_name': card.name,
+            'purchase_date': purchase_date,
+            'month': month,
+            'closing_date': closing,
+            'due_date': invoice.due_date if invoice else due_date,
+            'destination': f'Fatura de {month:%m/%Y} · compra em {purchase_date:%d/%m/%Y}',
+            'conflicts': conflicts,
+            'can_create': not conflicts,
+        })
     def perform_destroy(self, instance):
         if instance.subscription_id:
             raise ValidationError('Cancele a assinatura para interromper cobranças futuras.')

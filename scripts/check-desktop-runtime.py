@@ -30,6 +30,7 @@ with tempfile.TemporaryDirectory(prefix='clareza-portable-') as temp:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     today = date.today()
     first_month = today.replace(day=1)
+    previous_month = (first_month - timedelta(days=1)).replace(day=1)
     next_month = first_month.replace(
         day=calendar.monthrange(first_month.year, first_month.month)[1]
     ) + timedelta(days=1)
@@ -70,6 +71,30 @@ with tempfile.TemporaryDirectory(prefix='clareza-portable-') as temp:
                         'balance': '0.00', 'balance_month': first_month.isoformat(),
                     })
                     category = request('categories/', 'POST', {'name': 'Teste parcelado'})
+                    card = request('cards/', 'POST', {
+                        'name': 'Cartão portátil', 'account': account['id'],
+                        'closing_day': 2, 'due_day': 11,
+                    })
+                    card_transaction = request('transactions/', 'POST', {
+                        'description': 'Compra antes do fechamento', 'amount': '25.00',
+                        'kind': 'expense', 'date': first_month.isoformat(),
+                        'category': category['id'], 'card': card['id'],
+                    })
+                    assert card_transaction['month'] == previous_month.isoformat()
+                    card_purchase = request('installment-purchases/', 'POST', {
+                        'description': 'Parcelado no cartão', 'total_amount': '60.00',
+                        'installment_count': 2, 'purchase_date': first_month.isoformat(),
+                        'category': category['id'], 'account': None, 'card': card['id'],
+                        'notes': '', 'request_id': 'portable-card-closing-test',
+                    })
+                    assert [row['month'] for row in card_purchase['schedule']] == [
+                        previous_month.isoformat(), first_month.isoformat(),
+                    ]
+                    assert [row['date'] for row in card_purchase['schedule']] == [
+                        first_month.isoformat(), next_month.isoformat(),
+                    ]
+                    assert card_purchase['schedule'][0]['closing_date'] == first_month.replace(day=2).isoformat()
+                    assert card_purchase['schedule'][0]['due_date'] == first_month.replace(day=11).isoformat()
                     purchase = request('installment-purchases/', 'POST', {
                         'description': 'Compra portátil', 'total_amount': '100.00',
                         'installment_count': 3, 'purchase_date': today.isoformat(),
@@ -89,13 +114,16 @@ with tempfile.TemporaryDirectory(prefix='clareza-portable-') as temp:
                     profile = request('profile/')
                     assert profile['display_name'] == 'Portable test' and profile['theme'] == 'dark'
                     purchases = request('installment-purchases/')
-                    assert len(purchases) == 1 and purchases[0]['description'] == 'Compra portátil'
+                    assert {row['description'] for row in purchases} == {
+                        'Compra portátil', 'Parcelado no cartão',
+                    }
                     projected = request(f'transactions/monthly/?year={next_month.year}&month={next_month.month}')
                     assert any(row['source_type'] == 'installment' for row in projected)
                     assert any(row['source_type'] == 'subscription' and row['is_projected'] for row in projected)
                     agenda = request(f'payments/upcoming/?year={today.year}&month={today.month}')
                     assert any(row['kind'] == 'subscription' and row['status'] == 'registered' for row in agenda)
-                    assert request(f'payments/pending/?year={today.year}&month={today.month}') == []
+                    pending = request(f'payments/pending/?year={today.year}&month={today.month}')
+                    assert any(row['description'] == 'Fatura Cartão portátil' for row in pending)
                 child.stdin.close()
                 assert child.wait(timeout=10) == 0
             finally:
@@ -104,4 +132,4 @@ with tempfile.TemporaryDirectory(prefix='clareza-portable-') as temp:
                     child.wait()
     assert (directory / 'user-data/clareza.sqlite3').is_file()
     assert list((directory / 'user-data/backups').glob('*.sqlite3'))
-    print('OK: serviço relocável, SQLite novo, autenticação, primeira cobrança, agenda mensal, parcelamento, projeção, persistência, backup e encerramento.')
+    print('OK: serviço relocável, SQLite novo, autenticação, competência de cartão, primeira cobrança, agenda mensal, parcelamento, projeção, persistência, backup e encerramento.')

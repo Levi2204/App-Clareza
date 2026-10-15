@@ -9,6 +9,7 @@ from rest_framework.exceptions import ValidationError
 from .models import Account, Balance, Card, Invoice, Transaction, Subscription, Bill, Goal, GoalState, Contribution
 from .projections import projected_subscriptions, monthly_items
 from .subscription_calendar import occurrence_date
+from .card_cycle import CARD_CYCLE_POLICY, calculate_due_date, cycle_closing_date
 
 ZERO = Decimal('0.00')
 
@@ -37,8 +38,36 @@ def total(qs, field='amount'):
 def invoice_total(invoice):
     return invoice.manual_amount if invoice.manual_amount is not None else sum((row.amount for row in invoice.transactions.all()), ZERO)
 
-def ensure_invoice(user, card, month):
-    return Invoice.objects.get_or_create(user=user, card=card, month=month, defaults={'due_date': due(month, card.due_day)})[0]
+def ensure_invoice(user, card, month, cycle_policy=CARD_CYCLE_POLICY):
+    defaults = {'due_date': due(month, card.due_day)}
+    if cycle_policy == CARD_CYCLE_POLICY:
+        defaults.update({
+            'due_date': calculate_due_date(month, card.closing_day, card.due_day),
+            'cycle_closing_date': cycle_closing_date(month, card.closing_day),
+            'cycle_policy': CARD_CYCLE_POLICY,
+        })
+    return Invoice.objects.get_or_create(user=user, card=card, month=month, defaults=defaults)[0]
+
+
+def invoice_cycle_conflict(invoice, card, month):
+    """Return a review message when recorded cycle metadata contradicts the current operation.
+
+    Legacy invoices without metadata remain usable and are never silently rewritten.
+    """
+    if not invoice.cycle_policy:
+        return None
+    expected_closing = cycle_closing_date(month, card.closing_day)
+    expected_due = calculate_due_date(month, card.closing_day, card.due_day)
+    if (invoice.cycle_policy != CARD_CYCLE_POLICY
+            or invoice.cycle_closing_date != expected_closing
+            or invoice.due_date != expected_due):
+        return (
+            f'A fatura de {card.name} em {month:%m/%Y} usa vencimento '
+            f'{invoice.due_date:%d/%m/%Y}, mas o ciclo atual fecha em '
+            f'{expected_closing:%d/%m/%Y} e venceria em {expected_due:%d/%m/%Y}. '
+            'Revise a fatura antes de registrar a compra.'
+        )
+    return None
 
 @atomic_db.atomic
 def materialize(user, until=None):
@@ -53,7 +82,7 @@ def materialize(user, until=None):
             charge_date = occurrence_date(sub, current)
             if charge_date and charge_date <= stop:
                 if not Transaction.objects.filter(subscription=sub, month=current).exists():
-                    invoice = ensure_invoice(user, sub.card, current) if sub.card else None
+                    invoice = ensure_invoice(user, sub.card, current, cycle_policy='legacy') if sub.card else None
                     if invoice and invoice.paid_on:
                         raise ValidationError({'invoice': f'A fatura de {invoice.card.name} em {current:%m/%Y} está paga. Reabra-a antes de registrar a cobrança de {sub.name}.'})
                     if invoice and invoice.manual_amount is not None and total(invoice.transactions.all()) + sub.amount > invoice.manual_amount:
@@ -247,10 +276,13 @@ def observed_liabilities(user, month, params=None):
         bills = bills.none()
     invoice_amount = ZERO
     for item in invoices:
+        observed_details = [row for row in item.transactions.all() if row.date <= cutoff]
         if params.get('category_id'):
-            invoice_amount += sum((row.amount for row in item.transactions.all() if str(row.category_id) == str(params['category_id'])), ZERO)
+            invoice_amount += sum((row.amount for row in observed_details if str(row.category_id) == str(params['category_id'])), ZERO)
+        elif item.manual_amount is not None:
+            invoice_amount += item.manual_amount
         else:
-            invoice_amount += invoice_total(item)
+            invoice_amount += sum((row.amount for row in observed_details), ZERO)
     return invoice_amount + total(bills)
 
 
