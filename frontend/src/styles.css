@@ -318,3 +318,8 @@ h1,h2,h3,.brand,.stat>strong,.account-balance{font-family:'Manrope Variable','DM
   border-color: var(--border);
 }
 
+.delete-action:hover {
+  color: #b25f48;
+}
+
+

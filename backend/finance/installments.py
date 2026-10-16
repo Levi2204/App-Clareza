@@ -258,3 +258,12 @@ def cancel_remaining(purchase, from_month):
     purchase.save(update_fields=['cancelled_from_month', 'cancelled_at'])
     purchase._prefetched_objects_cache = {}
     return purchase
+
+
+@transaction.atomic
+def delete_purchase(purchase):
+    paid = purchase.installments.select_related('invoice').filter(invoice__paid_on__isnull=False).first()
+    if paid:
+        raise ValidationError(f'A fatura de {paid.month:%m/%Y} está paga. Reabra-a antes de excluir a compra parcelada.')
+    purchase.installments.all().delete()
+    purchase.delete()

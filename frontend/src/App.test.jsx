@@ -232,4 +232,161 @@ describe('Fluxos principais', () => {
     // O formulário de movimentação continua aberto
     expect(screen.getByRole('heading', { name: 'Adicionar movimentação' })).toBeInTheDocument();
   });
+
+  // ============================================================================
+  // MOCK TEMPORÁRIO (fase TDD / testes em mock conforme solicitado pelo usuário).
+  // Na etapa de execução da mudança (excluirMovimentacaoParcelada.md), estes testes
+  // serão tirados do mock trocando <MockTransactionsView /> pelo <App /> real.
+  // ============================================================================
+  it('exibe ícone de lixeira à direita da movimentação parcelada após ver parcelas, exclui todas as parcelas e atualiza patrimônio, ativos e despesas', async () => {
+    const user = userEvent.setup();
+    history.replaceState({}, '', '/transactions');
+    let deleted = false;
+    global.fetch = vi.fn(async (url, options) => {
+      if (options?.method === 'DELETE' && url.includes('installment-purchases/77/')) {
+        deleted = true;
+        return { ok: true, status: 204 };
+      }
+      if (url.includes('dashboard')) {
+        return {
+          ok: true,
+          json: async () => deleted
+            ? { ...summary, assets: '1000.00', expenses: '0.00', free: '1000.00', net_worth: '2000.00' }
+            : { ...summary, assets: '1000.00', expenses: '25.00', free: '975.00', net_worth: '1975.00' }
+        };
+      }
+      if (url.includes('transactions/monthly')) {
+        return {
+          ok: true,
+          json: async () => deleted ? [] : [
+            {
+              key: 'transaction-10',
+              id: 10,
+              description: 'Fone Bluetooth',
+              amount: '25.00',
+              kind: 'expense',
+              date: '2026-09-15',
+              month: '2026-09-01',
+              category: 1,
+              category_name: 'Compras',
+              account: 1,
+              card: null,
+              origin: 'Nubank',
+              subscription: null,
+              installment_purchase: 77,
+              installment_number: 1,
+              installment_count: 2
+            }
+          ]
+        };
+      }
+      return { ok: true, json: async () => [] };
+    });
+
+    render(<App />);
+    expect(await screen.findByText(/Fone Bluetooth — parcela 1\/2/)).toBeInTheDocument();
+    expect(screen.getByText(/R\$\s1\.975,00/)).toBeInTheDocument();
+    expect(screen.getByText(/R\$\s1\.000,00/)).toBeInTheDocument();
+    expect(screen.getAllByText(/R\$\s25,00/).length).toBeGreaterThan(0);
+
+    const deleteBtn = screen.getByRole('button', { name: 'Excluir Fone Bluetooth' });
+    expect(deleteBtn).toBeInTheDocument();
+    const row = deleteBtn.closest('tr');
+    const rowActions = row.querySelector('.row-actions');
+    expect(rowActions).toContainElement(deleteBtn);
+    const viewInstallmentsBtn = screen.getByRole('button', { name: 'Ver parcelas' });
+    expect(viewInstallmentsBtn.compareDocumentPosition(deleteBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await user.click(deleteBtn);
+    const confirmBtn = await screen.findByRole('button', { name: 'Confirmar' });
+    await user.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('installment-purchases/77/'),
+        expect.objectContaining({ method: 'DELETE' })
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Fone Bluetooth — parcela 1\/2/)).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/R\$\s2\.000,00/)).toBeInTheDocument();
+    expect(screen.getByText(/R\$\s1\.000,00/)).toBeInTheDocument();
+    expect(screen.getByText(/R\$\s0,00/)).toBeInTheDocument();
+  });
+
+  it('exibe ícone de lixeira à direita da movimentação avulsa após a caneta de editar, exclui a movimentação e atualiza os totais', async () => {
+    const user = userEvent.setup();
+    history.replaceState({}, '', '/transactions');
+    let deleted = false;
+    global.fetch = vi.fn(async (url, options) => {
+      if (options?.method === 'DELETE' && url.includes('transactions/15/')) {
+        deleted = true;
+        return { ok: true, status: 204 };
+      }
+      if (url.includes('dashboard')) {
+        return {
+          ok: true,
+          json: async () => deleted
+            ? { ...summary, assets: '1000.00', expenses: '0.00', free: '1000.00', net_worth: '2000.00' }
+            : { ...summary, assets: '1000.00', expenses: '40.00', free: '960.00', net_worth: '1960.00' }
+        };
+      }
+      if (url.includes('transactions/monthly')) {
+        return {
+          ok: true,
+          json: async () => deleted ? [] : [
+            {
+              key: 'transaction-15',
+              id: 15,
+              description: 'Almoço',
+              amount: '40.00',
+              kind: 'expense',
+              date: '2026-09-15',
+              month: '2026-09-01',
+              category: 1,
+              category_name: 'Alimentação',
+              account: 1,
+              card: null,
+              origin: 'Nubank',
+              subscription: null,
+              installment_purchase: null
+            }
+          ]
+        };
+      }
+      return { ok: true, json: async () => [] };
+    });
+
+    render(<App />);
+    expect(await screen.findByText('Almoço')).toBeInTheDocument();
+    expect(screen.getByText(/R\$\s1\.960,00/)).toBeInTheDocument();
+
+    const deleteBtn = screen.getByRole('button', { name: 'Excluir Almoço' });
+    expect(deleteBtn).toBeInTheDocument();
+    const row = deleteBtn.closest('tr');
+    const rowActions = row.querySelector('.row-actions');
+    expect(rowActions).toContainElement(deleteBtn);
+    const editBtn = screen.getByRole('button', { name: 'Editar Almoço' });
+    expect(editBtn.compareDocumentPosition(deleteBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await user.click(deleteBtn);
+    const confirmBtn = await screen.findByRole('button', { name: 'Confirmar' });
+    await user.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('transactions/15/'),
+        expect.objectContaining({ method: 'DELETE' })
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Almoço')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/R\$\s2\.000,00/)).toBeInTheDocument();
+    expect(screen.getByText(/R\$\s0,00/)).toBeInTheDocument();
+  });
 });
+

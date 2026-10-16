@@ -323,6 +323,13 @@ class InstallmentPurchaseViewSet(viewsets.ViewSet):
         purchase = get_object_or_404(self._queryset(request), pk=pk)
         return Response(installments.purchase_data(installments.cancel_remaining(purchase, from_month)))
 
+    def destroy(self, request, pk=None):
+        from django.shortcuts import get_object_or_404
+        purchase = get_object_or_404(self._queryset(request), pk=pk)
+        installments.delete_purchase(purchase)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class GoalViewSet(BaseViewSet):
     queryset = m.Goal.objects.all()
     serializer_class = ser.GoalSerializer

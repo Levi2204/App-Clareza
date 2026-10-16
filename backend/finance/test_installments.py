@@ -260,6 +260,94 @@ class InstallmentProjectionTests(TestCase):
         self.assertEqual(response.status_code, 204)
         self.assertFalse(m.InstallmentPurchase.objects.exists())
 
+    def test_delete_installment_purchase_removes_all_installments_and_updates_summary(self):
+        m.Balance.objects.create(account=self.account, month=date(2026, 9, 1), amount=Decimal('1000.00'))
+        m.Transaction.objects.create(
+            user=self.user,
+            account=self.account,
+            category=self.category,
+            kind='income',
+            description='Salário',
+            amount=Decimal('500.00'),
+            date=date(2026, 9, 15),
+            month=date(2026, 9, 1),
+        )
+        purchase = self.create(
+            total_amount='50.00',
+            installment_count=2,
+            purchase_date='2026-09-15',
+            first_month='2026-09-01',
+        )
+        self.assertEqual(purchase.status_code, 201)
+        purchase_id = purchase.data['id']
+
+        summary_sep = s.summary(self.user, date(2026, 9, 1))
+        self.assertEqual(summary_sep['expenses'], Decimal('25.00'))
+        self.assertEqual(summary_sep['installment_total'], Decimal('25.00'))
+        self.assertEqual(summary_sep['assets'], Decimal('1000.00'))
+        self.assertEqual(summary_sep['free'], Decimal('475.00'))
+        self.assertEqual(summary_sep['net_worth'], Decimal('1475.00'))
+
+        summary_oct = s.summary(self.user, date(2026, 10, 1))
+        self.assertEqual(summary_oct['expenses'], Decimal('25.00'))
+        self.assertEqual(summary_oct['installment_total'], Decimal('25.00'))
+
+        response = self.client.delete(f'/api/v1/installment-purchases/{purchase_id}/')
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(m.InstallmentPurchase.objects.count(), 0)
+        self.assertEqual(m.Transaction.objects.filter(kind='expense').count(), 0)
+
+        summary_sep_after = s.summary(self.user, date(2026, 9, 1))
+        self.assertEqual(summary_sep_after['expenses'], Decimal('0.00'))
+        self.assertEqual(summary_sep_after['installment_total'], Decimal('0.00'))
+        self.assertEqual(summary_sep_after['assets'], Decimal('1000.00'))
+        self.assertEqual(summary_sep_after['free'], Decimal('500.00'))
+        self.assertEqual(summary_sep_after['net_worth'], Decimal('1500.00'))
+
+        summary_oct_after = s.summary(self.user, date(2026, 10, 1))
+        self.assertEqual(summary_oct_after['expenses'], Decimal('0.00'))
+        self.assertEqual(summary_oct_after['installment_total'], Decimal('0.00'))
+
+    def test_delete_card_installment_purchase_updates_invoice_and_liabilities_and_blocks_if_paid(self):
+        purchase = self.create(
+            total_amount='50.00',
+            installment_count=2,
+            purchase_date='2026-09-15',
+            first_month='2026-09-01',
+            account=None,
+            card=self.card.id,
+        )
+        self.assertEqual(purchase.status_code, 201)
+        purchase_id = purchase.data['id']
+
+        summary_sep = s.summary(self.user, date(2026, 9, 1))
+        self.assertEqual(summary_sep['expenses'], Decimal('25.00'))
+        self.assertEqual(summary_sep['invoice_total'], Decimal('25.00'))
+        self.assertEqual(summary_sep['liabilities'], Decimal('25.00'))
+
+        first_installment = m.Transaction.objects.filter(installment_purchase_id=purchase_id, installment_number=1).first()
+        invoice = first_installment.invoice
+        invoice.paid_on = date(2026, 9, 15)
+        invoice.save(update_fields=['paid_on'])
+
+        response = self.client.delete(f'/api/v1/installment-purchases/{purchase_id}/')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(m.InstallmentPurchase.objects.count(), 1)
+        self.assertEqual(m.Transaction.objects.filter(installment_purchase_id=purchase_id).count(), 2)
+
+        invoice.paid_on = None
+        invoice.save(update_fields=['paid_on'])
+
+        response = self.client.delete(f'/api/v1/installment-purchases/{purchase_id}/')
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(m.InstallmentPurchase.objects.count(), 0)
+        self.assertEqual(m.Transaction.objects.filter(installment_purchase_id=purchase_id).count(), 0)
+
+        summary_after = s.summary(self.user, date(2026, 9, 1))
+        self.assertEqual(summary_after['expenses'], Decimal('0.00'))
+        self.assertEqual(summary_after['invoice_total'], Decimal('0.00'))
+        self.assertEqual(summary_after['liabilities'], Decimal('0.00'))
+
 
 class MonthlyInvoiceCorrectionTests(TestCase):
     def setUp(self):

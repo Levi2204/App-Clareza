@@ -157,8 +157,7 @@ export function InstallmentDetailsDialog({ purchaseId, close, saved }) {
   const dialog = useRef(null);
   const [purchase, setPurchase] = useState(null);
   const [error, setError] = useState('');
-  const next = new Date(`${today()}T12:00:00`); next.setMonth(next.getMonth() + 1);
-  const [fromMonth, setFromMonth] = useState(next.toLocaleDateString('sv-SE').slice(0, 7));
+  const [fromMonth, setFromMonth] = useState(today().slice(0, 7));
   const [busy, setBusy] = useState(false);
   useEffect(() => { dialog.current.showModal(); api(`installment-purchases/${purchaseId}/`).then(setPurchase).catch(e => setError(e.message)); }, [purchaseId]);
   async function cancelRemaining() {
