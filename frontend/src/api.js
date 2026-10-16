@@ -34,7 +34,8 @@ const labels = {
   target_date: 'Prazo',
   date: 'Data',
   manual_amount: 'Total da fatura',
-  name: 'Nome'
+  name: 'Nome',
+  photo: 'Foto'
 };
 export const money = value => Number(value || 0).toLocaleString('pt-BR', {
   style: 'currency',

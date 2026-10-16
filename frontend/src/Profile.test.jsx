@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ProfilePage from './Profile';
 import App from './App';
@@ -38,6 +38,32 @@ describe('Perfil e aparência', () => {
     const user = userEvent.setup(); render(<ProfilePage {...props()}/>);
     fetch.mockResolvedValueOnce({ ok: false, json: async () => ({ email: ['E-mail inválido.'] }) });
     await user.click(screen.getByRole('button', { name: 'Salvar alterações' })); expect(await screen.findByRole('alert')).toHaveTextContent('E-mail inválido.');
+  });
+  it('rejeita arquivo com mais de 5 MB antes do envio', async () => {
+    const user = userEvent.setup(); render(<ProfilePage {...props()}/>);
+    const bigFile = new File(['a'.repeat(100)], 'big.png', { type: 'image/png' });
+    Object.defineProperty(bigFile, 'size', { value: 6 * 1024 * 1024 });
+    const input = screen.getByLabelText('Foto de perfil');
+    await user.upload(input, bigFile);
+    expect(await screen.findByRole('alert')).toHaveTextContent('A foto deve ter no máximo 5 MB.');
+  });
+  it('rejeita tipo de arquivo não suportado', async () => {
+    render(<ProfilePage {...props()}/>);
+    const gifFile = new File(['gif'], 'anim.gif', { type: 'image/gif' });
+    const input = screen.getByLabelText('Foto de perfil');
+    fireEvent.change(input, { target: { files: [gifFile] } });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Escolha uma foto PNG, JPEG ou WebP.');
+  });
+  it('preserva a prévia no formulário quando o servidor rejeita o salvamento', async () => {
+    const user = userEvent.setup();
+    const photoData = 'data:image/png;base64,previewdata123';
+    render(<ProfilePage {...props()} profile={{ ...profile, photo: photoData }}/>);
+    fetch.mockResolvedValueOnce({ ok: false, json: async () => ({ photo: ['Foto inválida.'] }) });
+    await user.click(screen.getByRole('button', { name: 'Salvar alterações' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Foto: Foto inválida.');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('photo:');
+    // O botão de remover foto ainda está disponível porque a foto permanece no draft
+    expect(screen.getByRole('button', { name: 'Remover foto' })).toBeInTheDocument();
   });
   it('abre perfil pelo nome e persiste o tema na aplicação', async () => {
     const user = userEvent.setup(); const summary = { accounts: [], goals: [], payments: [], history: [], categories: [] };

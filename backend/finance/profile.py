@@ -58,7 +58,7 @@ class ProfileSerializer(serializers.ModelSerializer):
                     if length or pos+12 != len(raw):
                         raise ValueError()
                     ended = True
-                elif kind not in (b'sRGB', b'gAMA', b'cHRM', b'pHYs', b'tEXt', b'iTXt'):
+                elif kind not in (b'sRGB', b'gAMA', b'cHRM', b'iCCP', b'cICP', b'sBIT', b'bKGD', b'pHYs', b'tEXt', b'zTXt', b'iTXt', b'tIME', b'eXIf'):
                     raise ValueError()
                 if kind in (b'IHDR', b'IDAT', b'IEND'):
                     chunks.append(raw[pos:pos+12+length])
@@ -72,7 +72,7 @@ class ProfileSerializer(serializers.ModelSerializer):
                 raise ValueError()
             return prefix + base64.b64encode(raw[:8]+b''.join(chunks)).decode()
         except (ValueError, struct.error, binascii.Error, zlib.error):
-            raise serializers.ValidationError('Foto inválida. Escolha uma imagem PNG, JPEG ou WebP pelo seletor de foto.')
+            raise serializers.ValidationError('Não foi possível validar a foto enviada. Tente selecionar outra imagem.')
 
     @transaction.atomic
     def update(self, instance, validated_data):
