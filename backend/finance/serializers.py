@@ -179,21 +179,30 @@ class InvoiceSerializer(OwnedSerializer):
 
 class InstallmentPurchaseInputSerializer(serializers.Serializer):
     kind = serializers.ChoiceField(choices=['expense', 'income'], required=False, default='expense', write_only=True)
-    description = serializers.CharField(max_length=150)
+    description = serializers.CharField(max_length=150, required=False, allow_blank=True, default='')
     notes = serializers.CharField(required=False, allow_blank=True, default='')
     total_amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal('0.01'))
     installment_count = serializers.IntegerField(min_value=2, max_value=MAX_INSTALLMENTS)
     purchase_date = serializers.DateField()
     first_month = serializers.DateField(required=False)
-    category = serializers.PrimaryKeyRelatedField(queryset=m.Category.objects.all())
+    category = serializers.PrimaryKeyRelatedField(queryset=m.Category.objects.all(), required=False, allow_null=True, default=None)
     account = serializers.PrimaryKeyRelatedField(queryset=m.Account.objects.all(), required=False, allow_null=True)
     card = serializers.PrimaryKeyRelatedField(queryset=m.Card.objects.all(), required=False, allow_null=True)
     request_id = serializers.CharField(max_length=64, required=False)
 
     def validate(self, attrs):
         user = self.context['request'].user
+        is_preview = self.context.get('is_preview', False)
         if attrs.pop('kind') != 'expense':
             raise serializers.ValidationError({'kind': 'Somente despesas podem ser parceladas.'})
+        if not is_preview:
+            errors = {}
+            if not attrs.get('description'):
+                errors['description'] = 'Informe a descrição da compra.'
+            if not attrs.get('category'):
+                errors['category'] = 'Selecione uma categoria.'
+            if errors:
+                raise serializers.ValidationError(errors)
         account, card = attrs.get('account'), attrs.get('card')
         if bool(account) == bool(card):
             raise serializers.ValidationError({'account': 'Selecione exatamente uma conta ou um cartão.'})

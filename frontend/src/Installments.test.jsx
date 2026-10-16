@@ -39,7 +39,7 @@ describe('Compras parceladas', () => {
     await fill(user);
     await user.click(screen.getByRole('button', { name: 'Calcular prévia' }));
     expect(await screen.findByText('1/3')).toBeInTheDocument();
-    expect(screen.getByText(/R\$\s33,34/)).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Prévia das parcelas')).getByText(/R\$\s33,34/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Confirmar parcelamento' }));
     await waitFor(() => expect(saved).toHaveBeenCalledWith('Compra registrada em 3 parcelas.'));
     const calls = fetch.mock.calls.map(([, options]) => JSON.parse(options.body));
@@ -99,5 +99,63 @@ describe('Compras parceladas', () => {
     // A prévia deve ter sido invalidada
     expect(screen.queryByText('1/3')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Confirmar parcelamento' })).toBeDisabled();
+  });
+
+  it('mostra imediatamente o valor de cada parcela ao selecionar a quantidade de parcelas sem clicar em calcular', async () => {
+    const user = userEvent.setup();
+    render(<InstallmentDialog data={data} month="2026-09" close={vi.fn()} saved={vi.fn()} />);
+
+    await user.type(screen.getByLabelText('Valor total (R$)'), '300');
+    await user.clear(screen.getByLabelText('Quantidade de parcelas'));
+    await user.type(screen.getByLabelText('Quantidade de parcelas'), '3');
+    expect(screen.getByText(/3x de R\$\s*100,00/)).toBeInTheDocument();
+    expect(screen.getByText(/Soma:\s*R\$\s*300,00/)).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Quantidade de parcelas'));
+    await user.type(screen.getByLabelText('Quantidade de parcelas'), '4');
+    expect(screen.getByText(/4x de R\$\s*75,00/)).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Valor total (R$)'));
+    await user.type(screen.getByLabelText('Valor total (R$)'), '100');
+    await user.clear(screen.getByLabelText('Quantidade de parcelas'));
+    await user.type(screen.getByLabelText('Quantidade de parcelas'), '3');
+    expect(screen.getByText(/R\$\s*33,34/)).toBeInTheDocument();
+    expect(screen.getByText(/R\$\s*33,33/)).toBeInTheDocument();
+  });
+
+  it('calcula a prévia do servidor automaticamente e permite salvar sem clicar no botão de calcular prévia', async () => {
+    const user = userEvent.setup();
+    const saved = vi.fn();
+    fetch.mockImplementation(async url => ({
+      ok: true,
+      status: url.includes('installment-purchases/preview/') ? 200 : 201,
+      json: async () => url.includes('installment-purchases/preview/') ? preview : { ...preview, id: 9 },
+    }));
+    render(<InstallmentDialog data={data} month="2026-09" close={vi.fn()} saved={saved} />);
+
+    await fill(user);
+    expect(await screen.findByText('1/3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirmar parcelamento' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar parcelamento' }));
+    await waitFor(() => expect(saved).toHaveBeenCalledWith('Compra registrada em 3 parcelas.'));
+  });
+
+  it('preserva a prévia automática já calculada quando o usuário preenche a descrição ou observação depois de selecionar as parcelas', async () => {
+    const user = userEvent.setup();
+    fetch.mockImplementation(async () => ({ ok: true, status: 200, json: async () => preview }));
+    render(<InstallmentDialog data={data} month="2026-09" close={vi.fn()} saved={vi.fn()} />);
+
+    await user.type(screen.getByLabelText('Valor total (R$)'), '100');
+    await user.clear(screen.getByLabelText('Quantidade de parcelas'));
+    await user.type(screen.getByLabelText('Quantidade de parcelas'), '3');
+    await user.selectOptions(screen.getByLabelText('Conta ou cartão'), 'account:1');
+    expect(await screen.findByText('1/3')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Descrição'), 'Mesa de escritório');
+    await user.selectOptions(screen.getByLabelText('Categoria'), '3');
+    await user.type(screen.getByLabelText(/Observação/), 'Sem juros');
+    expect(screen.getByText('1/3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirmar parcelamento' })).toBeEnabled();
   });
 });

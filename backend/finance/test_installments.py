@@ -94,6 +94,32 @@ class InstallmentProjectionTests(TestCase):
         self.assertFalse(m.Transaction.objects.exists())
         self.assertEqual(self.create(first_month='2026-08-01').status_code, 400)
 
+    def test_preview_allows_omitting_description_and_category_while_create_requires_them(self):
+        preview_payload = self.payload(total_amount='100.00')
+        preview_payload.pop('description')
+        preview_payload.pop('category')
+        preview_payload.pop('request_id')
+
+        preview = self.client.post('/api/v1/installment-purchases/preview/', preview_payload, format='json')
+        self.assertEqual(preview.status_code, 200, preview.data)
+        self.assertTrue(preview.data['can_create'])
+        self.assertEqual(
+            [Decimal(row['amount']) for row in preview.data['schedule']],
+            [Decimal('33.34'), Decimal('33.33'), Decimal('33.33')],
+        )
+
+        missing_description = self.payload(request_id='missing-description')
+        missing_description.pop('description')
+        response = self.client.post('/api/v1/installment-purchases/', missing_description, format='json')
+        self.assertEqual(response.status_code, 400, response.data)
+
+        missing_category = self.payload(request_id='missing-category')
+        missing_category.pop('category')
+        response = self.client.post('/api/v1/installment-purchases/', missing_category, format='json')
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertFalse(m.InstallmentPurchase.objects.exists())
+        self.assertFalse(m.Transaction.objects.exists())
+
     def test_creation_is_atomic_and_idempotent(self):
         first = self.create()
         self.assertEqual(first.status_code, 201, first.data)
@@ -105,12 +131,12 @@ class InstallmentProjectionTests(TestCase):
         self.assertEqual(self.create(total_amount='301.00').status_code, 409)
         self.assertEqual([s.summary(self.user, date(2026, month, 1))['expenses'] for month in [9, 10, 11, 12]], [100, 100, 100, 0])
 
-    def test_card_invoice_conflict_rolls_everything_back(self):
-        m.Invoice.objects.create(user=self.user, card=self.card, month=date(2026, 11, 1), due_date=date(2026, 11, 12), paid_on=date(2026, 9, 15))
+    def test_paid_invoice_from_another_card_does_not_block_the_selected_card(self):
+        other_card = m.Card.objects.create(user=self.user, name='Outro cartão', account=self.account, due_day=12)
+        m.Invoice.objects.create(user=self.user, card=other_card, month=date(2026, 11, 1), due_date=date(2026, 11, 12), paid_on=date(2026, 9, 15))
         response = self.create(account=None, card=self.card.id)
-        self.assertEqual(response.status_code, 400)
-        self.assertFalse(m.InstallmentPurchase.objects.exists())
-        self.assertFalse(m.Transaction.objects.exists())
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(all(row.invoice.card_id == self.card.id for row in m.Transaction.objects.all()))
 
     def test_manual_invoice_conflict_in_later_month_rolls_everything_back(self):
         m.Invoice.objects.create(
@@ -367,3 +393,137 @@ class MonthlyInvoiceCorrectionTests(TestCase):
         self.assertEqual(m.Transaction.objects.get().date, date(2026, 9, 16))
         blocked = self.client.post(f'/api/v1/subscriptions/{legacy.id}/review-first-charge/', {'include_start_month': False}, format='json')
         self.assertFalse(blocked.data['can_apply'])
+
+
+class PaidInvoicePurchaseAcceptanceTests(TestCase):
+    """Acceptance coverage for markdowns/correcaoDestinoFaturaEStatusPagoTest.md.
+
+    These cases preserve the paid status while adding newly recorded purchases.
+    """
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user('paid-invoice-acceptance')
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.account = m.Account.objects.create(user=self.user, name='Conta de testes')
+        self.category = m.Category.objects.create(user=self.user, name='Categoria de testes')
+        self.card = m.Card.objects.create(
+            user=self.user, name='Cartão de testes', account=self.account,
+            closing_day=15, due_day=25,
+        )
+        self.clock = patch('django.utils.timezone.localdate', return_value=date(2026, 10, 16))
+        self.clock.start()
+        self.addCleanup(self.clock.stop)
+
+    def paid_invoice(self, month, manual_amount=Decimal('100.00')):
+        invoice = s.ensure_invoice(self.user, self.card, month)
+        invoice.manual_amount = manual_amount
+        invoice.paid_on = date(2026, 10, 16)
+        invoice.save(update_fields=['manual_amount', 'paid_on'])
+        return invoice
+
+    def installment_payload(self, **changes):
+        payload = {
+            'description': 'Compra em fatura paga', 'notes': '',
+            'total_amount': '50.00', 'installment_count': 2,
+            'purchase_date': '2026-10-16', 'category': self.category.id,
+            'account': None, 'card': self.card.id, 'request_id': 'paid-invoice-attempt',
+        }
+        payload.update(changes)
+        return payload
+
+    def test_paid_invoice_on_another_card_does_not_change_the_destination(self):
+        other_card = m.Card.objects.create(user=self.user, name='Outro cartão', account=self.account, closing_day=15, due_day=25)
+        m.Invoice.objects.create(
+            user=self.user, card=other_card, month=date(2026, 10, 1),
+            due_date=date(2026, 11, 25), paid_on=date(2026, 10, 16),
+        )
+        preview = self.client.post('/api/v1/transactions/preview/', {
+            'card': self.card.id, 'date': '2026-10-16', 'amount': '25.00',
+        }, format='json')
+        self.assertEqual(preview.status_code, 200, preview.data)
+        self.assertEqual(preview.data['month'], date(2026, 10, 1))
+        self.assertTrue(preview.data['can_create'])
+        created = self.client.post('/api/v1/transactions/', {
+            'description': 'Compra simples', 'amount': '25.00', 'kind': 'expense',
+            'date': '2026-10-16', 'category': self.category.id, 'card': self.card.id,
+        }, format='json')
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(m.Transaction.objects.get(pk=created.data['id']).invoice.card_id, self.card.id)
+
+    def test_simple_purchase_in_paid_target_preserves_payment_and_increments_manual_total(self):
+        invoice = self.paid_invoice(date(2026, 10, 1))
+        preview = self.client.post('/api/v1/transactions/preview/', {
+            'card': self.card.id, 'date': '2026-10-16', 'amount': '25.00',
+        }, format='json')
+        self.assertEqual(preview.status_code, 200, preview.data)
+        self.assertEqual(preview.data['month'], date(2026, 10, 1))
+        self.assertTrue(preview.data['can_create'])
+
+        created = self.client.post('/api/v1/transactions/', {
+            'description': 'Compra simples', 'amount': '25.00', 'kind': 'expense',
+            'date': '2026-10-16', 'category': self.category.id, 'card': self.card.id,
+        }, format='json')
+        self.assertEqual(created.status_code, 201, created.data)
+        invoice.refresh_from_db()
+        transaction = m.Transaction.objects.get(pk=created.data['id'])
+        self.assertEqual(transaction.invoice_id, invoice.id)
+        self.assertEqual(transaction.month, date(2026, 10, 1))
+        self.assertEqual(invoice.paid_on, date(2026, 10, 16))
+        self.assertEqual(invoice.manual_amount, Decimal('125.00'))
+        summary = s.summary(self.user, date(2026, 10, 1))
+        self.assertEqual(summary['expenses'], Decimal('125.00'))
+        self.assertEqual(summary['liabilities'], Decimal('0.00'))
+        self.assertEqual(s.pending_payments(self.user, date(2026, 10, 1)), [])
+
+    def test_paid_manual_invoice_at_monetary_limit_is_rejected_without_writing(self):
+        invoice = self.paid_invoice(date(2026, 10, 1), s.MAX_MONEY)
+        preview = self.client.post('/api/v1/transactions/preview/', {
+            'card': self.card.id, 'date': '2026-10-16', 'amount': '0.01',
+        }, format='json')
+        self.assertEqual(preview.status_code, 200, preview.data)
+        self.assertFalse(preview.data['can_create'])
+        created = self.client.post('/api/v1/transactions/', {
+            'description': 'Excede limite', 'amount': '0.01', 'kind': 'expense',
+            'date': '2026-10-16', 'category': self.category.id, 'card': self.card.id,
+        }, format='json')
+        self.assertEqual(created.status_code, 400, created.data)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.manual_amount, s.MAX_MONEY)
+        self.assertFalse(m.Transaction.objects.exists())
+
+    def test_installments_keep_each_paid_or_open_destination_and_are_idempotent(self):
+        paid = self.paid_invoice(date(2026, 10, 1))
+        open_invoice = s.ensure_invoice(self.user, self.card, date(2026, 11, 1))
+        preview = self.client.post('/api/v1/installment-purchases/preview/', self.installment_payload(), format='json')
+        self.assertEqual(preview.status_code, 200, preview.data)
+        self.assertEqual([row['month'] for row in preview.data['schedule']], ['2026-10-01', '2026-11-01'])
+        self.assertTrue(preview.data['can_create'])
+
+        first = self.client.post('/api/v1/installment-purchases/', self.installment_payload(), format='json')
+        self.assertEqual(first.status_code, 201, first.data)
+        second = self.client.post('/api/v1/installment-purchases/', self.installment_payload(), format='json')
+        self.assertEqual(second.status_code, 200, second.data)
+        self.assertEqual(first.data['id'], second.data['id'])
+        paid.refresh_from_db()
+        open_invoice.refresh_from_db()
+        self.assertEqual(paid.manual_amount, Decimal('125.00'))
+        self.assertEqual(paid.paid_on, date(2026, 10, 16))
+        self.assertIsNone(open_invoice.paid_on)
+        self.assertEqual(
+            list(m.Transaction.objects.filter(installment_purchase_id=first.data['id']).order_by('installment_number').values_list('invoice_id', flat=True)),
+            [paid.id, open_invoice.id],
+        )
+        self.assertEqual(m.Transaction.objects.filter(installment_purchase_id=first.data['id']).count(), 2)
+
+    def test_confirmation_keeps_the_destination_if_it_is_paid_after_preview(self):
+        preview = self.client.post('/api/v1/installment-purchases/preview/', self.installment_payload(), format='json')
+        self.assertEqual(preview.status_code, 200, preview.data)
+        self.assertTrue(preview.data['can_create'])
+        paid = self.paid_invoice(date(2026, 10, 1))
+
+        created = self.client.post('/api/v1/installment-purchases/', self.installment_payload(), format='json')
+        self.assertEqual(created.status_code, 201, created.data)
+        paid.refresh_from_db()
+        self.assertEqual(paid.paid_on, date(2026, 10, 16))
+        self.assertEqual(paid.manual_amount, Decimal('125.00'))

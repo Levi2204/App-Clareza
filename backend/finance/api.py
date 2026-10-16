@@ -122,9 +122,11 @@ class TransactionViewSet(BaseViewSet):
                 raise ValidationError({'invoice': cycle_conflict})
             subtotal = s.total(invoice.transactions.exclude(pk=old.pk if old else None))
             amount = data.get('amount', old.amount if old else Decimal(0))
-            if invoice.paid_on:
+            if invoice.paid_on and old:
                 raise ValidationError('Reabra a fatura antes de alterar seus gastos.')
-            if invoice.manual_amount is not None and subtotal + amount > invoice.manual_amount:
+            if invoice.paid_on:
+                s.increment_paid_invoice_manual_total(invoice, amount)
+            elif invoice.manual_amount is not None and subtotal + amount > invoice.manual_amount:
                 raise ValidationError({'amount': 'Os gastos ultrapassam o total manual da fatura. Atualize o total primeiro.'})
         if old and old.invoice and old.invoice.paid_on:
             raise ValidationError('Reabra a fatura antes de alterar seus gastos.')
@@ -146,13 +148,14 @@ class TransactionViewSet(BaseViewSet):
         cycle_conflict = s.invoice_cycle_conflict(invoice, card, month) if invoice else None
         if cycle_conflict:
             conflicts.append(cycle_conflict)
-        if invoice and invoice.paid_on:
-            conflicts.append(f'A fatura de {card.name} em {month:%m/%Y} está paga. Reabra-a antes de registrar a compra.')
         amount = serializer.validated_data.get('amount')
-        if invoice and amount is not None and invoice.manual_amount is not None:
-            detailed = s.total(invoice.transactions.all())
-            if detailed + amount > invoice.manual_amount:
-                conflicts.append(f'O total manual da fatura de {card.name} em {month:%m/%Y} não comporta a compra.')
+        if invoice and amount is not None:
+            if invoice.paid_on and not s.paid_invoice_manual_can_increment(invoice, amount):
+                conflicts.append(f'O total da fatura de {card.name} em {month:%m/%Y} excede o limite monetário permitido.')
+            elif not invoice.paid_on and invoice.manual_amount is not None:
+                detailed = s.total(invoice.transactions.all())
+                if detailed + amount > invoice.manual_amount:
+                    conflicts.append(f'O total manual da fatura de {card.name} em {month:%m/%Y} não comporta a compra.')
         return Response({
             'card': card.id,
             'card_name': card.name,
@@ -289,7 +292,7 @@ class InstallmentPurchaseViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['post'])
     def preview(self, request):
-        serializer = ser.InstallmentPurchaseInputSerializer(data=request.data, context={'request': request})
+        serializer = ser.InstallmentPurchaseInputSerializer(data=request.data, context={'request': request, 'is_preview': True})
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
         values.pop('request_id', None)

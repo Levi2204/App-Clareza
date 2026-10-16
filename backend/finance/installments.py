@@ -7,7 +7,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.exceptions import APIException, ValidationError
 
-from . import models as m
+from . import models as m, services as s
 from .card_cycle import calculate_due_date, cycle_closing_date
 
 MAX_INSTALLMENTS = 120
@@ -83,10 +83,10 @@ def _invoice_conflicts(user, card, schedule, lock=False):
         cycle_conflict = invoice_cycle_conflict(invoice, card, row['month'])
         if cycle_conflict:
             conflicts.append({'month': row['month'], 'kind': 'cycle', 'message': cycle_conflict})
-        if invoice.paid_on:
-            conflicts.append({'month': row['month'], 'kind': 'paid_invoice', 'message': f'A fatura de {card.name} em {label} está paga. Reabra-a antes de parcelar.'})
         detailed = sum((item.amount for item in invoice.transactions.all()), Decimal('0.00'))
-        if invoice.manual_amount is not None and detailed + row['amount'] > invoice.manual_amount:
+        if invoice.paid_on and not s.paid_invoice_manual_can_increment(invoice, row['amount']):
+            conflicts.append({'month': row['month'], 'kind': 'manual_amount', 'message': f'O total da fatura de {card.name} em {label} excede o limite monetário permitido.'})
+        elif not invoice.paid_on and invoice.manual_amount is not None and detailed + row['amount'] > invoice.manual_amount:
             conflicts.append({'month': row['month'], 'kind': 'manual_amount', 'message': f'O total manual da fatura de {card.name} em {label} não comporta a parcela.'})
     return conflicts
 
@@ -140,6 +140,8 @@ def create_purchase(user, values):
         if purchase.card:
             from .services import ensure_invoice
             invoice = ensure_invoice(user, purchase.card, row['month'])
+            invoice = m.Invoice.objects.select_for_update().get(pk=invoice.pk)
+            s.increment_paid_invoice_manual_total(invoice, row['amount'])
         m.Transaction.objects.create(
             user=user,
             description=purchase.description,

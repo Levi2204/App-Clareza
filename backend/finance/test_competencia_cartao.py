@@ -419,18 +419,17 @@ class CardInstallmentTests(TestCase):
             [Decimal("33.34"), Decimal("33.33"), Decimal("33.33")],
         )
 
-    def test_conflict_in_any_invoice_rolls_back_entire_creation(self):
-        """Conflito em qualquer fatura desfaz toda a criação."""
-        # Criar fatura de março paga
+    def test_manual_total_conflict_in_any_invoice_rolls_back_entire_creation(self):
+        """Um conflito de total manual em qualquer fatura desfaz toda a criação."""
         inv_mar = s.ensure_invoice(self.user, self.card, date(2027, 3, 1))
-        inv_mar.paid_on = date(2027, 3, 5)
-        inv_mar.save()
+        inv_mar.manual_amount = Decimal('50.00')
+        inv_mar.save(update_fields=['manual_amount'])
 
         payload = {
             "description": "Notebook",
             "total_amount": "300.00",
             "installment_count": 3,
-            "purchase_date": "2027-02-01",  # Parcelas em jan, fev, mar. Março está paga!
+            "purchase_date": "2027-02-01",  # Parcelas em jan, fev, mar. Março não comporta R$ 100,00.
             "category": self.category.id,
             "card": self.card.id,
             "request_id": "req-conflict-rollback",

@@ -7,6 +7,18 @@ import { DatePicker } from './DatePicker';
 
 const requestId = () => globalThis.crypto?.randomUUID?.() || `purchase-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+export function splitInstallmentAmounts(totalAmount, installmentCount) {
+  const normalizedAmount = String(totalAmount).trim().replace(',', '.');
+  const count = Number(installmentCount);
+  if (!/^\d+(\.\d{1,2})?$/.test(normalizedAmount) || !Number.isInteger(count) || count < 2 || count > 120) return [];
+  const [whole, decimal = ''] = normalizedAmount.split('.');
+  const cents = Number(whole) * 100 + Number(`${decimal}00`.slice(0, 2));
+  if (cents < count) return [];
+  const base = Math.floor(cents / count);
+  const remainder = cents % count;
+  return Array.from({ length: count }, (_, index) => (base + (index < remainder ? 1 : 0)) / 100);
+}
+
 function originOptions(data) {
   return [
     ...data.accounts.filter(row => row.is_active).map(row => [`account:${row.id}`, `Conta · ${row.name}`]),
@@ -17,6 +29,7 @@ function originOptions(data) {
 export function InstallmentDialog({ data, month, close, saved }) {
   const { hidden } = useValueVisibility();
   const dialog = useRef(null);
+  const previewTimer = useRef(null);
   const previewKey = useRef('');
   const [values, setValues] = useState({
     description: '', total_amount: '', installment_count: 2, purchase_date: today(),
@@ -27,25 +40,44 @@ export function InstallmentDialog({ data, month, close, saved }) {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => { dialog.current.showModal(); }, []);
-  const change = (name, value) => { setValues(current => ({ ...current, [name]: value })); setPreview(null); setPreviewBusy(false); previewKey.current = ''; };
-  const payload = () => {
+  const changesSchedule = name => ['total_amount', 'installment_count', 'purchase_date', 'first_month', 'origin'].includes(name);
+  const change = (name, value) => {
+    setValues(current => ({ ...current, [name]: value }));
+    if (changesSchedule(name)) {
+      setPreview(null); setPreviewBusy(false); previewKey.current = '';
+    }
+  };
+  const payload = (forPreview = false) => {
     const [kind, id] = values.origin.split(':');
     const result = {
       ...values,
       installment_count: Number(values.installment_count),
-      category: Number(values.category),
       account: kind === 'account' ? Number(id) : null,
       card: kind === 'card' ? Number(id) : null,
     };
+    if (values.category) result.category = Number(values.category);
+    else if (!forPreview) result.category = Number(values.category);
+    else delete result.category;
+    if (forPreview && !values.description) delete result.description;
     if (kind === 'account') result.first_month = `${values.first_month.slice(0, 7)}-01`;
     else delete result.first_month;
     delete result.origin;
     return result;
   };
+  const previewFingerprint = current => JSON.stringify({
+    total_amount: current.total_amount, installment_count: current.installment_count,
+    purchase_date: current.purchase_date, first_month: current.first_month || null,
+    account: current.account, card: current.card,
+  });
+  const canRequestPreview = current => {
+    if (!splitInstallmentAmounts(current.total_amount, current.installment_count).length || !current.purchase_date || !current.origin) return false;
+    return !current.origin.startsWith('account:') || Boolean(current.first_month);
+  };
   async function showPreview() {
+    if (previewTimer.current) clearTimeout(previewTimer.current);
     setPreviewBusy(true); setError('');
-    const current = payload();
-    const key = JSON.stringify(current);
+    const current = payload(true);
+    const key = previewFingerprint(current);
     previewKey.current = key;
     try {
       const result = await api('installment-purchases/preview/', { method: 'POST', body: JSON.stringify(current) });
@@ -53,10 +85,17 @@ export function InstallmentDialog({ data, month, close, saved }) {
     } catch (e) { if (previewKey.current === key) setError(e.message); }
     finally { if (previewKey.current === key) setPreviewBusy(false); }
   }
+  useEffect(() => {
+    if (!canRequestPreview(values)) return undefined;
+    const current = payload(true);
+    if (preview && previewKey.current === previewFingerprint(current)) return undefined;
+    previewTimer.current = setTimeout(() => showPreview(), 250);
+    return () => { clearTimeout(previewTimer.current); previewTimer.current = null; };
+  }, [values.total_amount, values.installment_count, values.purchase_date, values.first_month, values.origin, preview]);
   async function submit(e) {
     e.preventDefault();
     const current = payload();
-    if (!preview || previewKey.current !== JSON.stringify(current) || !preview.can_create) {
+    if (!preview || previewKey.current !== previewFingerprint(current) || !preview.can_create) {
       setError('Revise uma prévia atualizada antes de salvar.'); return;
     }
     setBusy(true); setError('');
@@ -66,6 +105,14 @@ export function InstallmentDialog({ data, month, close, saved }) {
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
+  const localAmounts = splitInstallmentAmounts(values.total_amount, values.installment_count);
+  const localGroups = localAmounts.reduce((groups, amount) => {
+    const group = groups.find(item => item.amount === amount);
+    if (group) group.count += 1;
+    else groups.push({ amount, count: 1 });
+    return groups;
+  }, []);
+  const localSum = localAmounts.reduce((sum, amount) => sum + amount, 0);
   return <dialog ref={dialog} className="dialog installment-dialog" onCancel={close} onClick={e => { if (e.target === dialog.current) close(); }}>
     <form onSubmit={submit}>
       <div className="dialog-heading"><div><span className="eyebrow">COMPROMISSOS MENSAIS</span><h2>Registrar compra parcelada</h2></div><button type="button" className="icon-button" onClick={close} aria-label="Fechar"><X size={20}/></button></div>
@@ -81,9 +128,27 @@ export function InstallmentDialog({ data, month, close, saved }) {
         <label className="wide">Observação <small>· opcional</small><textarea value={values.notes} onChange={e => change('notes', e.target.value)}/></label>
       </div>
       {error && <div role="alert" className="alert error">{hidden ? 'Existe um conflito financeiro. Mostre os valores para consultar os detalhes.' : error}</div>}
-      <div className="preview-actions"><button type="button" className="button secondary" disabled={previewBusy || busy} onClick={showPreview}>{previewBusy ? <><LoaderCircle className="spin" size={16}/>Calculando…</> : 'Calcular prévia'}</button>{preview && <strong>Soma: <MoneyValue value={preview.sum} /></strong>}</div>
+      {localAmounts.length > 0 && (
+        <div className="form-note installment-summary" aria-live="polite">
+          <strong>Parcelas: </strong>
+          {localGroups.map((group, index) => (
+            <React.Fragment key={group.amount}>
+              {index > 0 && ' · '}
+              {group.count}x de <MoneyValue value={group.amount} />
+            </React.Fragment>
+          ))}
+          <br />
+          <strong>Soma: <MoneyValue value={localSum} /></strong>
+          {previewBusy && <> · <small><LoaderCircle className="spin" size={12} /> Validando faturas…</small></>}
+          {!previewBusy && preview?.can_create && <> · <small>Cronograma validado</small></>}
+          {!previewBusy && preview && !preview.can_create && <> · <small>Revise os conflitos do cronograma</small></>}
+        </div>
+      )}
+      <button type="button" className="sr-only" tabIndex={-1} disabled={previewBusy || busy} onClick={showPreview}>
+        Calcular prévia
+      </button>
       {preview && <div className="installment-preview" aria-label="Prévia das parcelas">{preview.schedule.map(row => <div key={row.number}><span><strong>{row.number}/{preview.installment_count}</strong><span>Fatura {dateLabel(row.month).slice(3)} · compra em {dateLabel(row.date)}</span>{row.due_date && <small>Vencimento {dateLabel(row.due_date)}</small>}</span><strong><MoneyValue value={row.amount} /></strong></div>)}{preview.conflicts.map((row, index) => <p className="negative" key={index}>{row.message}</p>)}</div>}
-      <div className="dialog-footer"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" disabled={busy || !preview?.can_create}>{busy ? 'Salvando…' : 'Confirmar parcelamento'}<Check size={16}/></button></div>
+      <div className="dialog-footer"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" disabled={busy || previewBusy || !preview?.can_create}>{busy ? 'Salvando…' : 'Confirmar parcelamento'}<Check size={16}/></button></div>
     </form>
   </dialog>;
 }

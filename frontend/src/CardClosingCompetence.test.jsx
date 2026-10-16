@@ -104,27 +104,21 @@ describe('Competência pelo fechamento do cartão - Interface (Section 7)', () =
     expect(firstMonthInput).not.toBeDisabled();
   });
 
-  it('erros de fatura paga na prévia exibem alerta sem descartar os demais campos', async () => {
+  it('fatura paga no destino não impede o cronograma nem a confirmação', async () => {
     const user = userEvent.setup();
-    const conflictPreview = {
+    const paidInvoicePreview = {
       installment_count: 3,
       total_amount: '300.00',
       sum: '300.00',
-      can_create: false,
-      conflicts: [
-        {
-          month: '2027-01-01',
-          kind: 'paid_invoice',
-          message: 'A fatura de Cartão A em 01/2027 está paga. Reabra-a antes de parcelar.',
-        },
-      ],
+      can_create: true,
+      conflicts: [],
       schedule: cardSchedulePreview.schedule,
     };
 
     fetch.mockImplementation(async () => ({
       ok: true,
       status: 200,
-      json: async () => conflictPreview,
+      json: async () => paidInvoicePreview,
     }));
 
     render(<InstallmentDialog data={mockData} month="2027-02" close={vi.fn()} saved={vi.fn()} />);
@@ -135,10 +129,32 @@ describe('Competência pelo fechamento do cartão - Interface (Section 7)', () =
 
     await user.click(screen.getByRole('button', { name: 'Calcular prévia' }));
 
-    expect(await screen.findByText(/A fatura de Cartão A em 01\/2027 está paga/)).toBeInTheDocument();
-    // Campos preenchidos permanecem intactos
+    expect(await screen.findByText('1/3')).toBeInTheDocument();
     expect(screen.getByLabelText('Descrição')).toHaveValue('Geladeira');
     expect(screen.getByLabelText('Valor total (R$)')).toHaveValue(300);
+    expect(screen.queryByText(/Reabra-a antes de parcelar/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirmar parcelamento' })).toBeEnabled();
+  });
+
+  it('não marca como validado um cronograma com conflito real', async () => {
+    const user = userEvent.setup();
+    const conflictPreview = {
+      ...cardSchedulePreview,
+      can_create: false,
+      conflicts: [{
+        month: '2027-01-01', kind: 'cycle',
+        message: 'O ciclo da fatura precisa ser revisto antes de registrar a compra.',
+      }],
+    };
+    fetch.mockResolvedValue({ ok: true, status: 200, json: async () => conflictPreview });
+    render(<InstallmentDialog data={mockData} month="2027-02" close={vi.fn()} saved={vi.fn()} />);
+
+    await user.type(screen.getByLabelText('Valor total (R$)'), '300');
+    await user.selectOptions(screen.getByLabelText('Conta ou cartão'), 'card:10');
+    await user.click(screen.getByRole('button', { name: 'Calcular prévia' }));
+
+    expect(await screen.findByText(/ciclo da fatura precisa ser revisto/)).toBeInTheDocument();
+    expect(screen.queryByText('Cronograma validado')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Confirmar parcelamento' })).toBeDisabled();
   });
 });

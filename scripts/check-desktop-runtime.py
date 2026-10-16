@@ -75,6 +75,47 @@ with tempfile.TemporaryDirectory(prefix='clareza-portable-') as temp:
                         'name': 'Cartão portátil', 'account': account['id'],
                         'closing_day': 2, 'due_day': 11,
                     })
+                    paid_card = request('cards/', 'POST', {
+                        'name': 'Cartão com fatura paga', 'account': account['id'],
+                        'closing_day': 15, 'due_day': 25,
+                    })
+                    paid_invoice = request('invoices/', 'POST', {
+                        'card': paid_card['id'], 'month': first_month.isoformat(),
+                        'due_date': today.isoformat(), 'manual_amount': '100.00',
+                    })
+                    paid_invoice = request(f"invoices/{paid_invoice['id']}/pay/", 'POST')
+                    paid_on = paid_invoice['paid_on']
+                    paid_preview = request('transactions/preview/', 'POST', {
+                        'card': paid_card['id'], 'date': today.isoformat(), 'amount': '25.00',
+                    })
+                    assert paid_preview['can_create']
+                    request('transactions/', 'POST', {
+                        'description': 'Compra em fatura paga', 'amount': '25.00',
+                        'kind': 'expense', 'date': today.isoformat(),
+                        'category': category['id'], 'card': paid_card['id'],
+                    })
+                    paid_invoice = request(f"invoices/{paid_invoice['id']}/")
+                    assert paid_invoice['manual_amount'] == '125.00'
+                    assert paid_invoice['paid_on'] == paid_on
+                    paid_installment_preview = request('installment-purchases/preview/', 'POST', {
+                        'description': 'Parcelado em fatura paga', 'total_amount': '50.00',
+                        'installment_count': 2, 'purchase_date': today.isoformat(),
+                        'category': category['id'], 'account': None, 'card': paid_card['id'],
+                        'notes': '', 'request_id': 'portable-paid-invoice-preview',
+                    })
+                    assert paid_installment_preview['can_create']
+                    paid_purchase = request('installment-purchases/', 'POST', {
+                        'description': 'Parcelado em fatura paga', 'total_amount': '50.00',
+                        'installment_count': 2, 'purchase_date': today.isoformat(),
+                        'category': category['id'], 'account': None, 'card': paid_card['id'],
+                        'notes': '', 'request_id': 'portable-paid-invoice-test',
+                    })
+                    assert [row['month'] for row in paid_purchase['schedule']] == [
+                        first_month.isoformat(), next_month.isoformat(),
+                    ]
+                    paid_invoice = request(f"invoices/{paid_invoice['id']}/")
+                    assert paid_invoice['manual_amount'] == '150.00'
+                    assert paid_invoice['paid_on'] == paid_on
                     card_transaction = request('transactions/', 'POST', {
                         'description': 'Compra antes do fechamento', 'amount': '25.00',
                         'kind': 'expense', 'date': first_month.isoformat(),
@@ -115,7 +156,7 @@ with tempfile.TemporaryDirectory(prefix='clareza-portable-') as temp:
                     assert profile['display_name'] == 'Portable test' and profile['theme'] == 'dark'
                     purchases = request('installment-purchases/')
                     assert {row['description'] for row in purchases} == {
-                        'Compra portátil', 'Parcelado no cartão',
+                        'Compra portátil', 'Parcelado no cartão', 'Parcelado em fatura paga',
                     }
                     projected = request(f'transactions/monthly/?year={next_month.year}&month={next_month.month}')
                     assert any(row['source_type'] == 'installment' for row in projected)

@@ -12,6 +12,7 @@ from .subscription_calendar import occurrence_date
 from .card_cycle import CARD_CYCLE_POLICY, calculate_due_date, cycle_closing_date
 
 ZERO = Decimal('0.00')
+MAX_MONEY = Decimal('999999999999.99')
 
 def month_start(value):
     return value.replace(day=1)
@@ -37,6 +38,22 @@ def total(qs, field='amount'):
 
 def invoice_total(invoice):
     return invoice.manual_amount if invoice.manual_amount is not None else sum((row.amount for row in invoice.transactions.all()), ZERO)
+
+
+def paid_invoice_manual_can_increment(invoice, amount):
+    """Whether a new purchase can be added to a paid invoice's stated total."""
+    return (not invoice.paid_on or invoice.manual_amount is None
+            or invoice.manual_amount + amount <= MAX_MONEY)
+
+
+def increment_paid_invoice_manual_total(invoice, amount):
+    """Keep a paid invoice paid while accounting for a newly recorded purchase."""
+    if not invoice.paid_on or invoice.manual_amount is None:
+        return
+    if not paid_invoice_manual_can_increment(invoice, amount):
+        raise ValidationError({'manual_amount': 'O total da fatura excede o limite monetário permitido.'})
+    invoice.manual_amount += amount
+    invoice.save(update_fields=['manual_amount'])
 
 def ensure_invoice(user, card, month, cycle_policy=CARD_CYCLE_POLICY):
     defaults = {'due_date': due(month, card.due_day)}
