@@ -75,7 +75,10 @@ export function DatePicker({
       setFocusedDay(parsed.day);
     } else {
       setTempDate('');
-      const todayParsed = parseISODate(today()) || { year: new Date().getFullYear(), month: new Date().getMonth(), day: new Date().getDate() };
+      let refIso = today();
+      if (min && refIso < min) refIso = min;
+      else if (max && refIso > max) refIso = max;
+      const todayParsed = parseISODate(refIso) || { year: new Date().getFullYear(), month: new Date().getMonth(), day: new Date().getDate() };
       setViewYear(todayParsed.year);
       setViewMonth(todayParsed.month);
       setFocusedDay(todayParsed.day);

@@ -41,7 +41,8 @@ class OwnedSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'start_date': 'O início deve estar nos últimos 10 anos.'})
             if value('end_date') and value('end_date') < value('start_date'):
                 raise serializers.ValidationError({'end_date': 'O encerramento deve ser posterior ao início.'})
-            if instance and ('start_date' in attrs or 'end_date' in attrs or 'is_active' in attrs):
+            raw_input = getattr(self, 'initial_data', {}) if isinstance(getattr(self, 'initial_data', None), dict) else {}
+            if instance and any(k in attrs or k in raw_input for k in ('start_date', 'end_date', 'is_active')):
                 raise serializers.ValidationError('Use a ação de cancelamento; o período original é preservado.')
         if self.Meta.model == m.Contribution:
             if value('date') < value('goal').start_date or value('date') > timezone.localdate():

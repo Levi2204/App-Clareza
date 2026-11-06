@@ -192,7 +192,8 @@ class InvoiceViewSet(BaseViewSet):
             raise ValidationError('Uma fatura futura é apenas um compromisso previsto e ainda não pode ser paga.')
         if s.invoice_total(obj) <= 0:
             raise ValidationError('Uma fatura vazia não pode ser marcada como paga.')
-        if projections.projected_subscriptions(request.user, obj.month, {'card_id': obj.card_id}):
+        if (projections.projected_subscriptions(request.user, obj.month, {'card_id': obj.card_id})
+                or obj.transactions.filter(subscription__isnull=False, date__gt=timezone.localdate()).exists()):
             raise ValidationError('Existem cobranças previstas nesta fatura. Sincronize a competência antes de registrar o pagamento.')
         obj.paid_on = timezone.localdate(); obj.save(update_fields=['paid_on'])
         return Response(self.get_serializer(obj).data)

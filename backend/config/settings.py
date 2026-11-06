@@ -9,7 +9,7 @@ MIDDLEWARE = ['django.middleware.security.SecurityMiddleware', 'corsheaders.midd
 ROOT_URLCONF = 'config.urls'
 WSGI_APPLICATION = 'config.wsgi.application'
 from .storage import data_directory
-DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': data_directory() / 'clareza.sqlite3', 'OPTIONS': {'timeout': 30, 'transaction_mode': 'IMMEDIATE'}}}
+DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': data_directory() / 'clareza.sqlite3', 'OPTIONS': {'timeout': 30, 'transaction_mode': 'IMMEDIATE'}, 'TEST': {'NAME': data_directory() / 'test_clareza.sqlite3'}}}
 LANGUAGE_CODE = 'pt-br'
 TIME_ZONE = 'America/Fortaleza'
 USE_TZ = True

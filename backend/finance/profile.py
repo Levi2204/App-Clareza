@@ -103,27 +103,28 @@ def profile(request):
         raise PermissionDenied('A conta foi excluída. Crie um novo espaço para continuar.')
     if request.method == 'POST':
         raise ValidationError('Já existe uma conta ativa.')
-    obj, _ = m.Profile.objects.get_or_create(user=request.user)
     if request.method == 'DELETE':
         if request.data.get('confirmation') != 'EXCLUIR':
             raise ValidationError({'confirmation': 'Digite EXCLUIR para apagar o perfil e todos os seus dados financeiros.'})
         with transaction.atomic():
-            user = get_user_model().objects.select_for_update().get(pk=request.user.pk)
-            # Follow PROTECT dependencies, deleting only this user's workspace.
-            m.Transaction.objects.filter(user=user).delete()
-            m.InstallmentPurchase.objects.filter(user=user).delete()
-            m.Contribution.objects.filter(user=user).delete()
-            m.GoalState.objects.filter(goal__user=user).delete()
-            for model in [m.Goal, m.Subscription, m.Invoice, m.Bill]:
-                model.objects.filter(user=user).delete()
-            m.Balance.objects.filter(account__user=user).delete()
-            for model in [m.Card, m.Account, m.Category]:
-                model.objects.filter(user=user).delete()
-            if settings.LOCAL_MODE and user.username == 'local':
-                m.LocalAccountState.objects.update_or_create(pk=1, defaults={'deleted': True})
-            user.delete()
+            user = get_user_model().objects.select_for_update().filter(pk=request.user.pk).first()
+            if user is not None:
+                # Follow PROTECT dependencies, deleting only this user's workspace.
+                m.Transaction.objects.filter(user=user).delete()
+                m.InstallmentPurchase.objects.filter(user=user).delete()
+                m.Contribution.objects.filter(user=user).delete()
+                m.GoalState.objects.filter(goal__user=user).delete()
+                for model in [m.Goal, m.Subscription, m.Invoice, m.Bill]:
+                    model.objects.filter(user=user).delete()
+                m.Balance.objects.filter(account__user=user).delete()
+                for model in [m.Card, m.Account, m.Category]:
+                    model.objects.filter(user=user).delete()
+                if settings.LOCAL_MODE and user.username == 'local':
+                    m.LocalAccountState.objects.update_or_create(pk=1, defaults={'deleted': True})
+                user.delete()
         logout(request)
         return Response(status=204)
+    obj, _ = m.Profile.objects.get_or_create(user=request.user)
     if request.method == 'PATCH':
         serializer = ProfileSerializer(obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
