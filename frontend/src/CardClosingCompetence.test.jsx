@@ -17,9 +17,9 @@ const cardSchedulePreview = {
   can_create: true,
   conflicts: [],
   schedule: [
-    { number: 1, month: '2027-01-01', date: '2027-02-01', amount: '100.00' },
-    { number: 2, month: '2027-02-01', date: '2027-03-01', amount: '100.00' },
-    { number: 3, month: '2027-03-01', date: '2027-04-01', amount: '100.00' },
+    { number: 1, month: '2027-02-01', date: '2027-02-01', amount: '100.00' },
+    { number: 2, month: '2027-03-01', date: '2027-03-01', amount: '100.00' },
+    { number: 3, month: '2027-04-01', date: '2027-04-01', amount: '100.00' },
   ],
 };
 
@@ -30,7 +30,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('Competência pelo fechamento do cartão - Interface (Section 7)', () => {
-  it('ao selecionar cartão e data 01/02/2027, a prévia de parcelas calcula competência inicial em janeiro', async () => {
+  it('ao selecionar cartão e data 01/02/2027, a prévia de parcelas calcula competência inicial no próprio mês (fevereiro)', async () => {
     const user = userEvent.setup();
     const saved = vi.fn();
 
@@ -54,8 +54,8 @@ describe('Competência pelo fechamento do cartão - Interface (Section 7)', () =
     await user.click(screen.getByRole('button', { name: 'Calcular prévia' }));
 
     expect(await screen.findByText('1/3')).toBeInTheDocument();
-    // A parcela 1/3 deve estar atribuída à fatura de janeiro
-    expect(screen.getByText(/01\/2027/)).toBeInTheDocument();
+    // A parcela 1/3 deve estar atribuída à fatura de fevereiro
+    expect(screen.getByText(/02\/2027/)).toBeInTheDocument();
   });
 
   it('alterar data ou cartão invalida a prévia anterior e resposta atrasada é descartada', async () => {

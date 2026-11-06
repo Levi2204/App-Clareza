@@ -18,7 +18,7 @@ class InstallmentProjectionTests(TestCase):
         self.client.force_authenticate(self.user)
         self.account = m.Account.objects.create(user=self.user, name='Conta')
         self.category = m.Category.objects.create(user=self.user, name='Compras')
-        self.card = m.Card.objects.create(user=self.user, name='Cartão', account=self.account, due_day=12)
+        self.card = m.Card.objects.create(user=self.user, name='Cartão', account=self.account, closing_day=25, due_day=12)
         self.clock = patch('django.utils.timezone.localdate', return_value=date(2026, 9, 15))
         self.clock.start()
         self.addCleanup(self.clock.stop)
@@ -355,7 +355,7 @@ class MonthlyInvoiceCorrectionTests(TestCase):
         self.client = APIClient(); self.client.force_authenticate(self.user)
         self.account = m.Account.objects.create(user=self.user, name='BB')
         self.category = m.Category.objects.create(user=self.user, name='Serviços')
-        self.card = m.Card.objects.create(user=self.user, name='Cartão BB', account=self.account, due_day=11)
+        self.card = m.Card.objects.create(user=self.user, name='Cartão BB', account=self.account, closing_day=25, due_day=11)
         self.clock = patch('django.utils.timezone.localdate', return_value=date(2026, 9, 16))
         self.clock.start(); self.addCleanup(self.clock.stop)
 
@@ -497,7 +497,7 @@ class PaidInvoicePurchaseAcceptanceTests(TestCase):
         self.category = m.Category.objects.create(user=self.user, name='Categoria de testes')
         self.card = m.Card.objects.create(
             user=self.user, name='Cartão de testes', account=self.account,
-            closing_day=15, due_day=25,
+            closing_day=25, due_day=25,
         )
         self.clock = patch('django.utils.timezone.localdate', return_value=date(2026, 10, 16))
         self.clock.start()
@@ -521,7 +521,7 @@ class PaidInvoicePurchaseAcceptanceTests(TestCase):
         return payload
 
     def test_paid_invoice_on_another_card_does_not_change_the_destination(self):
-        other_card = m.Card.objects.create(user=self.user, name='Outro cartão', account=self.account, closing_day=15, due_day=25)
+        other_card = m.Card.objects.create(user=self.user, name='Outro cartão', account=self.account, closing_day=25, due_day=25)
         m.Invoice.objects.create(
             user=self.user, card=other_card, month=date(2026, 10, 1),
             due_date=date(2026, 11, 25), paid_on=date(2026, 10, 16),

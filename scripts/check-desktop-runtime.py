@@ -77,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix='clareza-portable-') as temp:
                     })
                     paid_card = request('cards/', 'POST', {
                         'name': 'Cartão com fatura paga', 'account': account['id'],
-                        'closing_day': 15, 'due_day': 25,
+                        'closing_day': 25, 'due_day': 28,
                     })
                     paid_invoice = request('invoices/', 'POST', {
                         'card': paid_card['id'], 'month': first_month.isoformat(),
@@ -116,12 +116,18 @@ with tempfile.TemporaryDirectory(prefix='clareza-portable-') as temp:
                     paid_invoice = request(f"invoices/{paid_invoice['id']}/")
                     assert paid_invoice['manual_amount'] == '150.00'
                     assert paid_invoice['paid_on'] == paid_on
+                    card_prev_transaction = request('transactions/', 'POST', {
+                        'description': 'Compra mês anterior', 'amount': '10.00',
+                        'kind': 'expense', 'date': previous_month.isoformat(),
+                        'category': category['id'], 'card': card['id'],
+                    })
+                    assert card_prev_transaction['month'] == previous_month.isoformat()
                     card_transaction = request('transactions/', 'POST', {
                         'description': 'Compra antes do fechamento', 'amount': '25.00',
                         'kind': 'expense', 'date': first_month.isoformat(),
                         'category': category['id'], 'card': card['id'],
                     })
-                    assert card_transaction['month'] == previous_month.isoformat()
+                    assert card_transaction['month'] == first_month.isoformat()
                     card_purchase = request('installment-purchases/', 'POST', {
                         'description': 'Parcelado no cartão', 'total_amount': '60.00',
                         'installment_count': 2, 'purchase_date': first_month.isoformat(),
@@ -129,7 +135,7 @@ with tempfile.TemporaryDirectory(prefix='clareza-portable-') as temp:
                         'notes': '', 'request_id': 'portable-card-closing-test',
                     })
                     assert [row['month'] for row in card_purchase['schedule']] == [
-                        previous_month.isoformat(), first_month.isoformat(),
+                        first_month.isoformat(), next_month.isoformat(),
                     ]
                     assert [row['date'] for row in card_purchase['schedule']] == [
                         first_month.isoformat(), next_month.isoformat(),

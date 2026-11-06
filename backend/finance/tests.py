@@ -15,7 +15,7 @@ class FinanceTests(TestCase):
         self.account = m.Account.objects.create(user=self.user, name='Nubank')
         self.account2 = m.Account.objects.create(user=self.user, name='Inter')
         self.category = m.Category.objects.create(user=self.user, name='Alimentação')
-        self.card = m.Card.objects.create(user=self.user, name='Crédito', account=self.account)
+        self.card = m.Card.objects.create(user=self.user, name='Crédito', account=self.account, closing_day=25)
         self.month = date(2026, 9, 1)
         self.clock = patch('django.utils.timezone.localdate', return_value=date(2026, 9, 15)); self.clock.start(); self.addCleanup(self.clock.stop)
     def post(self, resource, data):
@@ -67,7 +67,7 @@ class FinanceTests(TestCase):
         self.assertEqual(self.expense(account=None, card=self.card.id, amount='300').status_code, 400)
         self.assertEqual(self.client.patch(f'/api/v1/invoices/{invoice.id}/', {'manual_amount': '10'}, format='json').status_code, 400)
     def test_two_cards_consolidation_and_account_isolation(self):
-        card2 = m.Card.objects.create(user=self.user, name='Inter Crédito', account=self.account2)
+        card2 = m.Card.objects.create(user=self.user, name='Inter Crédito', account=self.account2, closing_day=25)
         self.expense(account=None, card=self.card.id, amount='120')
         self.expense(account=None, card=card2.id, amount='80')
         self.assertEqual(s.summary(self.user, self.month)['invoice_total'], 200)

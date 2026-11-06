@@ -223,7 +223,7 @@ function FormDialog({
             })} />}{f.hint && <small className="hint">{f.hint}</small>}</label>
       );
     })}</div>
-    {transactionUsesCard && <div className="form-note"><strong>Competência calculada pelo fechamento</strong><br/>{transactionPreview?.destination || 'A competência será calculada a partir da data da compra e do cartão.'}{transactionPreview?.due_date && <> · vencimento {dateLabel(transactionPreview.due_date)}</>}<br/><small>Compras anteriores ao fechamento entram na fatura do mês anterior; no dia do fechamento começa o próximo ciclo.</small></div>}
+    {transactionUsesCard && <div className="form-note"><strong>Competência calculada pelo fechamento</strong><br/>{transactionPreview?.destination || 'A competência será calculada a partir da data da compra e do cartão.'}{transactionPreview?.due_date && <> · vencimento {dateLabel(transactionPreview.due_date)}</>}<br/><small>Compras antes do fechamento entram na fatura do mês da compra; a partir do dia do fechamento entram na fatura do mês seguinte.</small></div>}
     {error && <div role="alert" className="alert error">{hidden ? 'Existe um conflito financeiro. Mostre os valores para consultar os detalhes.' : error}</div>}<div className="dialog-footer"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" disabled={busy}>{busy ? 'Salvando…' : 'Salvar'}<Check size={16} /></button></div>
   </form></dialog>;
 }
