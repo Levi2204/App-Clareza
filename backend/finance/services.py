@@ -306,7 +306,13 @@ def observed_liabilities(user, month, params=None):
 def summary(user, month, params=None):
     params = params or {}
     origin_params = {key: params[key] for key in ['account_id', 'card_id'] if params.get(key)}
-    tx_all = filtered(Transaction.objects.filter(user=user, month=month).select_related('category', 'account', 'card'), origin_params)
+    tx_all = filtered(
+        Transaction.objects.filter(user=user).filter(
+            Q(card__isnull=True, month=month)
+            | Q(card__isnull=False, date__gte=month, date__lte=month_end(month))
+        ).select_related('category', 'account', 'card'),
+        origin_params,
+    )
     tx = filtered(tx_all, {'category_id': params.get('category_id')} if params.get('category_id') else {})
     bills_all = Bill.objects.filter(user=user, month=month).select_related('category')
     if params.get('account_id'):
@@ -328,14 +334,40 @@ def summary(user, month, params=None):
     direct_registered = total(tx.filter(kind='expense', card__isnull=True)) + total(bills)
     direct_projected = sum((row['amount'] for row in projected if row['card'] is None), ZERO)
     invoice_forecasts = monthly_invoices(user, month, params)
-    card_registered = sum((row['registered_amount'] for row in invoice_forecasts), ZERO)
-    card_forecast = sum((row['amount'] for row in invoice_forecasts), ZERO)
+    invoice_total = sum((row['amount'] for row in invoice_forecasts), ZERO)
+    card_tx_by_id = {}
+    for row in tx.filter(kind='expense', card__isnull=False):
+        card_tx_by_id[row.card_id] = card_tx_by_id.get(row.card_id, ZERO) + row.amount
+    card_proj_by_id = {}
+    for row in projected:
+        if row['card']:
+            card_proj_by_id[row['card']] = card_proj_by_id.get(row['card'], ZERO) + row['amount']
+    inv_by_card = {row['card_id']: row for row in invoice_forecasts}
+    all_card_ids = set(card_tx_by_id) | set(card_proj_by_id) | set(inv_by_card)
+
+    card_registered = ZERO
+    card_forecast = ZERO
     warnings = [row['warning'] for row in invoice_forecasts if row['warning']]
     if not params.get('category_id'):
         for row in invoice_forecasts:
             synthetic = max(ZERO, row['amount'] - row['known_amount'])
             if synthetic:
                 categories['Faturas sem detalhamento'] = categories.get('Faturas sem detalhamento', ZERO) + synthetic
+
+    for cid in all_card_ids:
+        c_tx = card_tx_by_id.get(cid, ZERO)
+        c_proj = card_proj_by_id.get(cid, ZERO)
+        inv_row = inv_by_card.get(cid)
+        if inv_row and inv_row['manual_amount'] is not None and not params.get('category_id'):
+            inv_detail = inv_row['known_amount'] - inv_row['projected_total']
+            c_surplus = max(ZERO, inv_row['manual_amount'] - inv_detail)
+        else:
+            c_surplus = ZERO
+        c_reg = c_tx + c_surplus
+        c_fore = max(c_reg, c_tx + c_proj)
+        card_registered += c_reg
+        card_forecast += c_fore
+
     expenses_registered = direct_registered + card_registered
     expenses = direct_registered + direct_projected + card_forecast
     forecast_increment = expenses - expenses_registered
@@ -361,4 +393,4 @@ def summary(user, month, params=None):
     subscription_projected = sum((row['amount'] for row in projected), ZERO)
     installment_total = total(tx.filter(installment_purchase__isnull=False))
     current_month = timezone.localdate().replace(day=1)
-    return {'month': month, 'assets': assets, 'liabilities': liabilities, 'net_worth': assets + free, 'income': income, 'expenses': expenses, 'expenses_registered': expenses_registered, 'expenses_forecast_increment': forecast_increment, 'goal_required': required, 'free': free, 'deficit': max(ZERO, -free), 'feasible': free >= 0 and not any(g['overdue'] and g['is_active'] for g in goals), 'contributions': contributions, 'categories': [{'name': k, 'amount': v} for k, v in sorted(categories.items(), key=lambda p: p[1], reverse=True)], 'accounts': account_rows, 'goals': goals, 'payments': payment_rows, 'subscription_total': subscription_registered + subscription_projected, 'subscription_registered_total': subscription_registered, 'subscription_projected_total': subscription_projected, 'installment_total': installment_total, 'invoice_total': card_forecast, 'invoice_forecasts': invoice_forecasts, 'is_forecast': month > current_month or bool(projected) or tx.filter(kind='expense', date__gt=timezone.localdate()).exists(), 'has_income': income > 0, 'items': monthly_items(user, month, params), 'warnings': warnings}
+    return {'month': month, 'assets': assets, 'liabilities': liabilities, 'net_worth': assets + free, 'income': income, 'expenses': expenses, 'expenses_registered': expenses_registered, 'expenses_forecast_increment': forecast_increment, 'goal_required': required, 'free': free, 'deficit': max(ZERO, -free), 'feasible': free >= 0 and not any(g['overdue'] and g['is_active'] for g in goals), 'contributions': contributions, 'categories': [{'name': k, 'amount': v} for k, v in sorted(categories.items(), key=lambda p: p[1], reverse=True)], 'accounts': account_rows, 'goals': goals, 'payments': payment_rows, 'subscription_total': subscription_registered + subscription_projected, 'subscription_registered_total': subscription_registered, 'subscription_projected_total': subscription_projected, 'installment_total': installment_total, 'invoice_total': invoice_total, 'invoice_forecasts': invoice_forecasts, 'is_forecast': month > current_month or bool(projected) or tx.filter(kind='expense', date__gt=timezone.localdate()).exists(), 'has_income': income > 0, 'items': monthly_items(user, month, params), 'warnings': warnings}

@@ -62,7 +62,10 @@ def projected_subscriptions(user, month, params=None):
 
 def persisted_transaction_items(user, month, params=None):
     params = params or {}
-    rows = m.Transaction.objects.filter(user=user, month=month).select_related(
+    rows = m.Transaction.objects.filter(user=user).filter(
+        Q(card__isnull=True, month=month)
+        | Q(card__isnull=False, date__gte=month, date__lte=month_end(month))
+    ).select_related(
         'category', 'account', 'card', 'card__account', 'installment_purchase'
     )
     if params.get('account_id'):

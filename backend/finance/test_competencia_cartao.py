@@ -261,9 +261,12 @@ class SimpleCardPurchaseTests(TestCase):
         self.assertEqual(tx.month, date(2027, 3, 1))
         self.assertEqual(tx.invoice.month, date(2027, 3, 1))
 
-        # Fevereiro agora tem 0 despesas, Março tem 100
-        self.assertEqual(s.summary(self.user, date(2027, 2, 1))["expenses"], Decimal("0.00"))
-        self.assertEqual(s.summary(self.user, date(2027, 3, 1))["expenses"], Decimal("100.00"))
+        # A fatura de fevereiro fica zerada e a fatura de março recebe os R$ 100,00,
+        # enquanto o gasto realizado (expenses) permanece contabilizado em fevereiro (mês da compra).
+        self.assertEqual(s.summary(self.user, date(2027, 2, 1))["invoice_total"], Decimal("0.00"))
+        self.assertEqual(s.summary(self.user, date(2027, 3, 1))["invoice_total"], Decimal("100.00"))
+        self.assertEqual(s.summary(self.user, date(2027, 2, 1))["expenses"], Decimal("100.00"))
+        self.assertEqual(s.summary(self.user, date(2027, 3, 1))["expenses"], Decimal("0.00"))
 
     def test_update_card_recalculates_but_description_preserves_competence(self):
         """Alterar cartão recalcula com fechamento do novo cartão; alterar somente descrição preserva."""
