@@ -30,6 +30,39 @@ const field = (name, label, type = 'text', extra = {}) => ({
   type,
   ...extra
 });
+
+export function calculateCardClosingDate(monthValue, closingDay) {
+  if (!monthValue) return '';
+  const [yearStr, monthStr] = String(monthValue).slice(0, 7).split('-');
+  const year = Number(yearStr);
+  const monthNum = Number(monthStr);
+  const daysInMonth = new Date(year, monthNum, 0).getDate();
+  const effClosing = Math.min(Number(closingDay) || 1, daysInMonth);
+  return `${year}-${String(monthNum).padStart(2, '0')}-${String(effClosing).padStart(2, '0')}`;
+}
+
+export function calculateCardDueDate(monthValue, closingDay, dueDay) {
+  if (!monthValue) return '';
+  const [yearStr, monthStr] = String(monthValue).slice(0, 7).split('-');
+  const year = Number(yearStr);
+  const monthNum = Number(monthStr);
+  const daysInMonth = new Date(year, monthNum, 0).getDate();
+  const effClosing = Math.min(Number(closingDay) || 1, daysInMonth);
+  const effDue = Math.min(Number(dueDay) || 1, daysInMonth);
+  if (effDue > effClosing) {
+    return `${year}-${String(monthNum).padStart(2, '0')}-${String(effDue).padStart(2, '0')}`;
+  }
+  let nextYear = year;
+  let nextMonth = monthNum + 1;
+  if (nextMonth > 12) {
+    nextYear += 1;
+    nextMonth = 1;
+  }
+  const daysInNextMonth = new Date(nextYear, nextMonth, 0).getDate();
+  const effDueNext = Math.min(Number(dueDay) || 1, daysInNextMonth);
+  return `${nextYear}-${String(nextMonth).padStart(2, '0')}-${String(effDueNext).padStart(2, '0')}`;
+}
+
 function FormDialog({
   modal,
   data,
@@ -44,6 +77,7 @@ function FormDialog({
     item = {}
   } = modal;
   const dialog = useRef(null);
+  const invoiceDueTouched = useRef(false);
   const initial = {
     date: today(),
     month: `${month}-01`,
@@ -61,6 +95,15 @@ function FormDialog({
   if (item.balance != null) initial.balance = item.balance;
   initial.balance_month = `${month}-01`;
   initial.origin = item.card ? `card:${item.card}` : item.account ? `account:${item.account}` : '';
+  if (type === 'invoices') {
+    const cardObj = item.card ? (data.cards || []).find(c => String(c.id) === String(item.card)) : null;
+    if (cardObj) {
+      const closing = calculateCardClosingDate(initial.month, cardObj.closing_day);
+      if (!item.id || (!item.paid_on && initial.due_date <= closing)) {
+        initial.due_date = calculateCardDueDate(initial.month, cardObj.closing_day, cardObj.due_day);
+      }
+    }
+  }
   const [values, setValues] = useState(initial);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -152,6 +195,27 @@ function FormDialog({
       if (transactionPreviewKey.current === key) setTransactionPreview({ error: previewError.message, can_create: false });
     });
   }, [transactionUsesCard, values.origin, values.date, values.kind, values.amount]);
+  const selectedCard = type === 'invoices' && values.card
+    ? (data.cards || []).find(c => String(c.id) === String(values.card))
+    : null;
+  const invoiceClosingDate = selectedCard && values.month
+    ? calculateCardClosingDate(values.month, selectedCard.closing_day)
+    : '';
+  const invoiceAutoDueDate = selectedCard && values.month
+    ? calculateCardDueDate(values.month, selectedCard.closing_day, selectedCard.due_day)
+    : '';
+  useEffect(() => {
+    if (type !== 'invoices' || !selectedCard || !values.month || invoiceDueTouched.current) {
+      return;
+    }
+    const shouldUpdate =
+      !item.id ||
+      (item.id && !item.paid_on && values.due_date <= invoiceClosingDate);
+
+    if (shouldUpdate && invoiceAutoDueDate && values.due_date !== invoiceAutoDueDate) {
+      setValues(prev => ({ ...prev, due_date: invoiceAutoDueDate }));
+    }
+  }, [type, values.card, values.month, selectedCard, invoiceClosingDate, invoiceAutoDueDate, item.id, item.paid_on, values.due_date]);
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
@@ -200,7 +264,12 @@ function FormDialog({
             name={f.name}
             label={f.label}
             value={values[f.name] ?? ''}
-            onChange={val => setValues(prev => ({ ...prev, [f.name]: val }))}
+            onChange={val => {
+              if (type === 'invoices' && f.name === 'due_date') {
+                invoiceDueTouched.current = true;
+              }
+              setValues(prev => ({ ...prev, [f.name]: val }));
+            }}
             optional={f.optional}
             disabled={f.disabled}
             min={f.min}
@@ -211,19 +280,62 @@ function FormDialog({
         );
       }
       return (
-        <label className={f.type === 'textarea' || f.hint ? 'wide' : ''} key={f.name}>{f.label}{f.optional && <small> · opcional</small>}{f.type === 'select' ? <select required={!f.optional} value={values[f.name] ?? ''} onChange={e => setValues({
-              ...values,
-              [f.name]: e.target.value
-            })}><option value="">Selecione</option>{f.options.map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select> : f.type === 'textarea' ? <textarea value={values[f.name] || ''} onChange={e => setValues({
-              ...values,
-              [f.name]: e.target.value
-            })} /> : <input autoFocus={f === fields[0]} required={!f.optional} disabled={f.disabled} type={f.type} min={f.min} max={f.max} step={f.step} value={f.type === 'month' ? (values[f.name] || '').slice(0, 7) : values[f.name] ?? ''} onChange={e => setValues({
-              ...values,
-              [f.name]: e.target.value
-            })} />}{f.hint && <small className="hint">{f.hint}</small>}</label>
+        <label className={f.type === 'textarea' || f.hint ? 'wide' : ''} key={f.name} htmlFor={f.name}>
+          {f.label}{f.optional && <small> · opcional</small>}
+          {f.type === 'select' ? (
+            <select
+              id={f.name}
+              aria-label={f.label}
+              required={!f.optional}
+              value={values[f.name] ?? ''}
+              onChange={e => setValues({
+                ...values,
+                [f.name]: e.target.value
+              })}
+            >
+              <option value="">Selecione</option>
+              {f.options.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+            </select>
+          ) : f.type === 'textarea' ? (
+            <textarea
+              id={f.name}
+              aria-label={f.label}
+              value={values[f.name] || ''}
+              onChange={e => setValues({
+                ...values,
+                [f.name]: e.target.value
+              })}
+            />
+          ) : (
+            <input
+              id={f.name}
+              aria-label={f.label}
+              autoFocus={f === fields[0]}
+              required={!f.optional}
+              disabled={f.disabled}
+              type={f.type}
+              min={f.min}
+              max={f.max}
+              step={f.step}
+              value={f.type === 'month' ? (values[f.name] || '').slice(0, 7) : values[f.name] ?? ''}
+              onChange={e => setValues({
+                ...values,
+                [f.name]: e.target.value
+              })}
+            />
+          )}
+          {f.hint && <small className="hint">{f.hint}</small>}
+        </label>
       );
     })}</div>
     {transactionUsesCard && <div className="form-note"><strong>Competência calculada pelo fechamento</strong><br/>{transactionPreview?.destination || 'A competência será calculada a partir da data da compra e do cartão.'}{transactionPreview?.due_date && <> · vencimento {dateLabel(transactionPreview.due_date)}</>}<br/><small>Compras antes do fechamento entram na fatura do mês da compra; a partir do dia do fechamento entram na fatura do mês seguinte.</small></div>}
+    {type === 'invoices' && selectedCard && (
+      <div className="form-note">
+        <strong>Ciclo da fatura · {selectedCard.name}</strong><br/>
+        Fechamento em {dateLabel(invoiceClosingDate)} · Vencimento em {dateLabel(values.due_date || invoiceAutoDueDate)}<br/>
+        <small>Os gastos da competência selecionada entram no planejamento daquele mês (&quot;Seu mês, planejado&quot;), mesmo quando o vencimento da fatura ocorre no mês seguinte.</small>
+      </div>
+    )}
     {error && <div role="alert" className="alert error">{hidden ? 'Existe um conflito financeiro. Mostre os valores para consultar os detalhes.' : error}</div>}<div className="dialog-footer"><button type="button" className="button secondary" onClick={close}>Cancelar</button><button className="button primary" disabled={busy}>{busy ? 'Salvando…' : 'Salvar'}<Check size={16} /></button></div>
   </form></dialog>;
 }

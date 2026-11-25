@@ -101,6 +101,14 @@ class CardViewSet(BaseViewSet):
     queryset = m.Card.objects.select_related('account')
     serializer_class = ser.CardSerializer
 
+    @transaction.atomic
+    def perform_update(self, serializer):
+        old_closing = serializer.instance.closing_day
+        old_due = serializer.instance.due_day
+        card = serializer.save()
+        if card.closing_day != old_closing or card.due_day != old_due:
+            s.reconcile_open_invoices(self.request.user, card=card)
+
 class CategoryViewSet(BaseViewSet):
     queryset = m.Category.objects.all()
     serializer_class = ser.CategorySerializer
@@ -139,8 +147,13 @@ class TransactionViewSet(BaseViewSet):
         serializer.is_valid(raise_exception=True)
         card = serializer.validated_data['card']
         purchase_date = serializer.validated_data['date']
-        from .card_cycle import card_competence, cycle_closing_date, calculate_due_date
+        from .card_cycle import card_competence, cycle_closing_date, calculate_due_date, effective_closing_date
         month = card_competence(purchase_date, card.closing_day)
+        existing_paid = m.Invoice.objects.filter(
+            user=request.user, card=card, month=purchase_date.replace(day=1), paid_on__isnull=False
+        ).first()
+        if existing_paid and purchase_date == effective_closing_date(purchase_date, card.closing_day):
+            month = existing_paid.month
         closing = cycle_closing_date(month, card.closing_day)
         due_date = calculate_due_date(month, card.closing_day, card.due_day)
         invoice = m.Invoice.objects.filter(user=request.user, card=card, month=month).first()
@@ -351,6 +364,7 @@ class GoalViewSet(BaseViewSet):
 @authentication_classes(AUTH)
 @permission_classes([IsAuthenticated])
 def sync(request):
+    s.reconcile_open_invoices(request.user)
     s.materialize(request.user)
     for name in ['Alimentação', 'Moradia', 'Transporte', 'Saúde', 'Educação', 'Lazer', 'Compras', 'Assinaturas', 'Serviços', 'Outros', 'Salário']:
         m.Category.objects.get_or_create(user=request.user, name=name)

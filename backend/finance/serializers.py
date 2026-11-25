@@ -4,7 +4,7 @@ from rest_framework import serializers
 from . import models as m, services as s
 from .installments import MAX_INSTALLMENTS
 from .subscription_calendar import choose_first_charge
-from .card_cycle import card_competence
+from .card_cycle import card_competence, CARD_CYCLE_POLICY, calculate_due_date, cycle_closing_date, effective_closing_date
 
 
 class OwnedSerializer(serializers.ModelSerializer):
@@ -142,6 +142,11 @@ class TransactionSerializer(OwnedSerializer):
         should_classify = card and (instance is None or 'date' in attrs or 'card' in attrs)
         if should_classify and purchase_date:
             expected = card_competence(purchase_date, card.closing_day)
+            existing_paid = m.Invoice.objects.filter(
+                user=self.context['request'].user, card=card, month=purchase_date.replace(day=1), paid_on__isnull=False
+            ).first()
+            if existing_paid and purchase_date == effective_closing_date(purchase_date, card.closing_day):
+                expected = existing_paid.month
             if supplied_month and attrs['month'] != expected:
                 raise serializers.ValidationError({
                     'month': f'A competência correta para esta compra é {expected:%m/%Y}, conforme o fechamento do cartão.',
@@ -168,14 +173,32 @@ class CardTransactionPreviewSerializer(serializers.Serializer):
         return attrs
 
 class InvoiceSerializer(OwnedSerializer):
+    due_date = serializers.DateField(required=False)
     total = serializers.SerializerMethodField()
     card_name = serializers.CharField(source='card.name', read_only=True)
+
     def get_total(self, obj):
         return str(s.invoice_total(obj))
+
     class Meta:
         model = m.Invoice
         fields = '__all__'
         read_only_fields = ['user', 'created_at', 'cycle_closing_date', 'cycle_policy']
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        card = attrs.get('card', self.instance.card if self.instance else None)
+        month = attrs.get('month', self.instance.month if self.instance else None)
+        if card and month:
+            expected_closing = cycle_closing_date(month, card.closing_day)
+            expected_due = calculate_due_date(month, card.closing_day, card.due_day)
+            if self.instance is None and 'due_date' not in attrs:
+                attrs['due_date'] = expected_due
+            current_due = attrs.get('due_date', self.instance.due_date if self.instance else None)
+            if current_due == expected_due:
+                attrs['cycle_closing_date'] = expected_closing
+                attrs['cycle_policy'] = CARD_CYCLE_POLICY
+        return attrs
 
 
 class InstallmentPurchaseInputSerializer(serializers.Serializer):
@@ -217,6 +240,11 @@ class InstallmentPurchaseInputSerializer(serializers.Serializer):
             raise serializers.ValidationError({'purchase_date': 'A data da compra não pode estar no futuro.'})
         if card:
             expected = card_competence(attrs['purchase_date'], card.closing_day)
+            existing_paid = m.Invoice.objects.filter(
+                user=user, card=card, month=attrs['purchase_date'].replace(day=1), paid_on__isnull=False
+            ).first()
+            if existing_paid and attrs['purchase_date'] == effective_closing_date(attrs['purchase_date'], card.closing_day):
+                expected = existing_paid.month
             if attrs.get('first_month') and attrs['first_month'].replace(day=1) != expected:
                 raise serializers.ValidationError({
                     'first_month': f'A primeira competência correta é {expected:%m/%Y}, conforme o fechamento do cartão.',

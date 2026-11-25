@@ -86,6 +86,34 @@ def invoice_cycle_conflict(invoice, card, month):
         )
     return None
 
+
+def effective_invoice_due_date(invoice, card):
+    closing = cycle_closing_date(invoice.month, card.closing_day)
+    if not invoice.paid_on and invoice.due_date <= closing:
+        return calculate_due_date(invoice.month, card.closing_day, card.due_day)
+    return invoice.due_date
+
+
+def reconcile_open_invoices(user, card=None):
+    qs = Invoice.objects.filter(user=user, paid_on__isnull=True).select_related('card')
+    if card is not None:
+        qs = qs.filter(card=card)
+    for inv in qs:
+        expected_closing = cycle_closing_date(inv.month, inv.card.closing_day)
+        expected_due = calculate_due_date(inv.month, inv.card.closing_day, inv.card.due_day)
+        should_update = (
+            inv.due_date <= expected_closing
+            or (card is not None and inv.cycle_policy == CARD_CYCLE_POLICY and (
+                inv.cycle_closing_date != expected_closing or inv.due_date != expected_due
+            ))
+        )
+        if should_update:
+            inv.cycle_closing_date = expected_closing
+            inv.due_date = expected_due
+            inv.cycle_policy = CARD_CYCLE_POLICY
+            inv.save(update_fields=['cycle_closing_date', 'due_date', 'cycle_policy'])
+
+
 @atomic_db.atomic
 def materialize(user, until=None):
     # No speculative future writes. Unique(subscription, month) makes retries safe.
@@ -93,13 +121,15 @@ def materialize(user, until=None):
     for sub in Subscription.objects.select_for_update(of=('self',)).filter(user=user).select_related('card'):
         if not sub.is_active and not sub.end_date:
             continue
+        if sub.start_date and sub.start_date > timezone.localdate():
+            continue
         stop = min(until, sub.end_date) if sub.end_date else until
         current = month_start(sub.first_charge_date or sub.start_date)
         while current <= month_start(stop):
             charge_date = occurrence_date(sub, current)
             if charge_date and charge_date <= stop:
                 if not Transaction.objects.filter(subscription=sub, month=current).exists():
-                    invoice = ensure_invoice(user, sub.card, current, cycle_policy='legacy') if sub.card else None
+                    invoice = ensure_invoice(user, sub.card, current) if sub.card else None
                     if invoice and invoice.paid_on:
                         raise ValidationError({'invoice': f'A fatura de {invoice.card.name} em {current:%m/%Y} está paga. Reabra-a antes de registrar a cobrança de {sub.name}.'})
                     if invoice and invoice.manual_amount is not None and total(invoice.transactions.all()) + sub.amount > invoice.manual_amount:
@@ -189,7 +219,7 @@ def monthly_invoices(user, month, params=None):
             continue
         paid = bool(invoice and invoice.paid_on and invoice.paid_on <= cutoff)
         forecast = month > current_month or invoice is None or bool(all_projection)
-        due_date = invoice.due_date if invoice else due(month, card.due_day)
+        due_date = effective_invoice_due_date(invoice, card) if invoice else calculate_due_date(month, card.closing_day, card.due_day)
         status_name = 'forecast' if forecast else ('paid' if paid else ('overdue' if due_date < cutoff else 'pending'))
         warning = None
         if not params.get('category_id') and invoice and invoice.manual_amount is not None and all_detail + all_projection > invoice.manual_amount and all_projection:
@@ -273,7 +303,8 @@ def pending_payments(user, month, params=None):
         amount = sum((row.amount for row in details if str(row.category_id) == str(params['category_id'])), ZERO) if params.get('category_id') else invoice_total(item)
         if amount <= ZERO:
             continue
-        result.append({'key': f'pending-invoice-{item.card_id}-{item.month:%Y-%m}', 'id': item.id, 'kind': 'invoice', 'month': item.month, 'card_id': item.card_id, 'account_id': item.card.account_id, 'description': f'Fatura {item.card.name}', 'origin': f'Cartão · {item.card.name}', 'registered_amount': amount, 'projected_increment': ZERO, 'amount': amount, 'due_date': item.due_date, 'paid_on': item.paid_on, 'days_until': (item.due_date - cutoff).days, 'is_forecast': False, 'status': 'overdue' if item.due_date < cutoff else 'pending', 'can_pay': item.paid_on is None})
+        item_due = effective_invoice_due_date(item, item.card)
+        result.append({'key': f'pending-invoice-{item.card_id}-{item.month:%Y-%m}', 'id': item.id, 'kind': 'invoice', 'month': item.month, 'card_id': item.card_id, 'account_id': item.card.account_id, 'description': f'Fatura {item.card.name}', 'origin': f'Cartão · {item.card.name}', 'registered_amount': amount, 'projected_increment': ZERO, 'amount': amount, 'due_date': item_due, 'paid_on': item.paid_on, 'days_until': (item_due - cutoff).days, 'is_forecast': False, 'status': 'overdue' if item_due < cutoff else 'pending', 'can_pay': item.paid_on is None})
     for item in bills:
         if item.amount <= ZERO:
             continue
