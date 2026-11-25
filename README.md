@@ -53,7 +53,7 @@ Abra **http://localhost:5173**. A API usa **http://127.0.0.1:8000/api/v1/** e o 
 - Dashboard: ativos, passivos, patrimônio, gastos por categoria, evolução, vencimentos e planejamento.
 - Contas e cartões: cadastro, edição, arquivamento, saldos mensais, visão por origem e competência calculada pelo fechamento.
 - Movimentações: despesas e receitas, categorias, edição, exclusão com confirmação, busca e filtros.
-- Compras parceladas: divisão exata em até 120 parcelas, prévia antes de salvar, cronograma mensal e cancelamento das parcelas restantes.
+- Compras parceladas: divisão exata em até 120 parcelas, cálculo e prévia automáticos antes de salvar, cronograma mensal, cancelamento das parcelas restantes e exclusão completa com atualização imediata dos totais.
 - Faturas: cálculo por cartão, total manual opcional, pagamento e reabertura.
 - Assinaturas: prévia obrigatória da primeira cobrança, escolha entre mês inicial e próxima recorrência, geração idempotente e projeções virtuais futuras.
 - Agenda mensal: uma linha consolidada por fatura e competência; pendências anteriores ficam em uma consulta separada, fechada inicialmente.
@@ -76,8 +76,8 @@ O teste Django usa um SQLite de teste separado. A suíte cobre também fechament
 - **Saldo manual:** movimentações e pagamentos não alteram automaticamente saldos. Atualize o saldo da conta para a competência desejada.
 - **Aportes:** registram quanto foi destinado à meta; não criam novos ativos nem transferem dinheiro. Registre reservas como contas para incluí-las no patrimônio.
 - **Faturas:** um total manual substitui a soma detalhada. O detalhamento não pode ultrapassá-lo.
-- **Competência:** em conta, é selecionada explicitamente. Em cartão, o servidor calcula pela data da compra: antes do fechamento entra na fatura do mês anterior; no dia do fechamento começa o novo ciclo.
-- **Vencimento da fatura:** novos ciclos automáticos vencem depois do fechamento, respeitando dias inexistentes em meses curtos. Faturas antigas não são reescritas silenciosamente.
+- **Competência e resumo mensal:** em conta, a competência é selecionada explicitamente. Em cartão, o servidor calcula o ciclo da fatura pela data da compra: antes do fechamento entra na fatura do mês da compra; a partir do dia do fechamento entra na fatura do mês seguinte. Já no resumo financeiro ("Seu mês, planejado") e na listagem mensal de movimentações, compras e parcelas de cartão são contabilizadas no mês em que ocorrem, sem duplicação no mês seguinte.
+- **Vencimento da fatura:** o vencimento é sempre estritamente posterior ao fechamento do ciclo (quando o dia de vencimento é menor ou igual ao de fechamento, o vencimento cai no mês seguinte), respeitando dias inexistentes em meses curtos. Faturas pagas não são reescritas; faturas em aberto acompanham automaticamente o ciclo do cartão.
 - **Parcelamento:** o valor informado é o total da compra. Cada parcela é um compromisso persistido na sua competência; não existe débito adicional pelo valor total.
 - **Projeções:** assinaturas futuras aparecem nas análises sem criar movimentações antecipadas. Valores previstos não reduzem o patrimônio atual.
 - **Modo pessoal:** acesso automático somente em loopback, com rejeição de origens externas. Não há tela de login na V1. Cada registro pertence a um usuário; `LOCAL_MODE=0` exige autenticação de sessão. Não expor este servidor de desenvolvimento na rede.
